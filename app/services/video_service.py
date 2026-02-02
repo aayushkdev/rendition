@@ -1,9 +1,11 @@
+import uuid
 from sqlalchemy.orm import Session
 
 from app.models.video import Video
 from app.models.rendition import Rendition
 from app.models.job import Job
 from app.models.enums import ProcessingStatus
+from app.schemas.video import VideoState, RenditionState
 
 
 DEFAULT_RENDITIONS = [
@@ -13,7 +15,7 @@ DEFAULT_RENDITIONS = [
 ]
 
 
-def create_video_service(db: Session, source: str) -> Video:
+def ingest_video(db: Session, source: str) -> Video:
     video = Video(
         source=source,
         status=ProcessingStatus.pending,
@@ -41,3 +43,28 @@ def create_video_service(db: Session, source: str) -> Video:
     db.commit()
     db.refresh(video)
     return video
+
+
+def get_video_state(db: Session, video_id: str) -> VideoState:
+
+    try:
+        video_uuid = uuid.UUID(video_id)
+    except ValueError:
+        return None
+
+    video = db.query(Video).filter(Video.id == video_uuid).first()
+
+    if video is None:
+        return None
+
+    return VideoState(
+        video_id=str(video.id),
+        status=video.status,
+        renditions=[
+            RenditionState(
+                resolution=r.resolution,
+                status=r.status,
+            )
+            for r in video.renditions
+        ],
+    )
