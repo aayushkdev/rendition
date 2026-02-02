@@ -1,4 +1,4 @@
-import uuid
+from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.models.video import Video
@@ -45,14 +45,9 @@ def ingest_video(db: Session, source: str) -> Video:
     return video
 
 
-def get_video_state(db: Session, video_id: str) -> VideoState:
+def get_video_state(db: Session, video_id: UUID) -> VideoState:
 
-    try:
-        video_uuid = uuid.UUID(video_id)
-    except ValueError:
-        return None
-
-    video = db.query(Video).filter(Video.id == video_uuid).first()
+    video = db.query(Video).filter(Video.id == video_id).first()
 
     if video is None:
         return None

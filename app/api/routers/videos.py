@@ -1,3 +1,4 @@
+from uuid import UUID
 from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy.orm import Session
 
@@ -32,7 +33,7 @@ def create_video(
     status_code=status.HTTP_200_OK,
 )
 def get_video(
-    video_id: str,
+    video_id: UUID,
     db: Session = Depends(get_db),
 ):
     state = get_video_state(db, video_id)
