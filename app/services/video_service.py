@@ -1,12 +1,10 @@
 from uuid import UUID
 from sqlalchemy.orm import Session
-
 from app.models.video import Video
 from app.models.rendition import Rendition
 from app.models.job import Job
 from app.models.enums import ProcessingStatus
 from app.schemas.video import VideoState, RenditionState
-
 
 DEFAULT_RENDITIONS = [
     {"resolution": "1080p", "bitrate": 5_000_000},
