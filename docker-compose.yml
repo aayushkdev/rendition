@@ -1,0 +1,10 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: rendition-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:///./rendition.db
