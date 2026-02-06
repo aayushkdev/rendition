@@ -1,9 +1,9 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy.orm import Session
-from app.db.session import get_db
+from core.db.session import get_db
 from app.schemas.video import VideoCreateRequest, VideoCreateResponse, VideoState
-from app.services.video_service import ingest_video, get_video_state
+from core.services.video_service import ingest_video, get_video_state
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 

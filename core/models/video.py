@@ -4,8 +4,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from app.db.base import Base
-from app.models.enums import ProcessingStatus
+from core.db.base import Base
+from core.models.enums import ProcessingStatus
 
 
 class Video(Base):

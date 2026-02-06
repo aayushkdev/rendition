@@ -1,10 +1,9 @@
 from uuid import UUID
 from sqlalchemy.orm import Session
-from app.models.video import Video
-from app.models.rendition import Rendition
-from app.models.job import Job
-from app.models.enums import ProcessingStatus
-from app.schemas.video import VideoState, RenditionState
+from core.models.video import Video
+from core.models.rendition import Rendition
+from core.models.job import Job
+from core.models.enums import ProcessingStatus
 
 DEFAULT_RENDITIONS = [
     {"resolution": "1080p", "bitrate": 5_000_000},
@@ -43,21 +42,6 @@ def ingest_video(db: Session, source: str) -> Video:
     return video
 
 
-def get_video_state(db: Session, video_id: UUID) -> VideoState:
-
+def get_video_state(db: Session, video_id: UUID) -> Video:
     video = db.query(Video).filter(Video.id == video_id).first()
-
-    if video is None:
-        return None
-
-    return VideoState(
-        video_id=str(video.id),
-        status=video.status,
-        renditions=[
-            RenditionState(
-                resolution=r.resolution,
-                status=r.status,
-            )
-            for r in video.renditions
-        ],
-    )
+    return video

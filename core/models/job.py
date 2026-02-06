@@ -3,8 +3,8 @@ from sqlalchemy import Column, Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from app.db.base import Base
-from app.models.enums import ProcessingStatus
+from core.db.base import Base
+from core.models.enums import ProcessingStatus
 
 
 class Job(Base):
