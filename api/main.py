@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.routers import health, root, videos
+from api.routers import health, root, videos
 
 app = FastAPI(
     title="Rendition",

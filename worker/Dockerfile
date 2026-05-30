@@ -17,6 +17,6 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen
 
 COPY core ./core
-COPY app ./app
+COPY worker ./worker
 
-CMD ["uv", "run", "python", "-m", "app.worker.main"]
+CMD ["uv", "run", "python", "-m", "worker.main"]

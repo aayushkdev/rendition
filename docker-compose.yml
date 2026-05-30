@@ -2,7 +2,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: api/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,7 +41,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: Dockerfile.worker
+      dockerfile: worker/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
