@@ -3,8 +3,146 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    container_name: rendition-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql+psycopg://rendition:rendition@postgres:5432/rendition
+      RABBITMQ_URL: amqp://rendition:rendition@rabbitmq:5672/%2F
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY_ID: rendition
+      STORAGE_SECRET_ACCESS_KEY: rendition-secret
+      STORAGE_BUCKET: rendition
+      STORAGE_REGION: us-east-1
     ports:
       - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "uv",
+          "run",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
-      DATABASE_URL: sqlite:///./rendition.db
+      DATABASE_URL: postgresql+psycopg://rendition:rendition@postgres:5432/rendition
+      RABBITMQ_URL: amqp://rendition:rendition@rabbitmq:5672/%2F
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY_ID: rendition
+      STORAGE_SECRET_ACCESS_KEY: rendition-secret
+      STORAGE_BUCKET: rendition
+      STORAGE_REGION: us-east-1
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "uv",
+          "run",
+          "python",
+          "-c",
+          "import os, pika; c = pika.BlockingConnection(pika.URLParameters(os.environ['RABBITMQ_URL'])); c.close()",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rendition
+      POSTGRES_USER: rendition
+      POSTGRES_PASSWORD: rendition
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rendition -d rendition"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: rendition
+      RABBITMQ_DEFAULT_PASS: rendition
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: rendition
+      MINIO_ROOT_PASSWORD: rendition-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./deploy/minio/cors.json:/tmp/cors.json:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "mc alias set local http://minio:9000 rendition rendition-secret &&
+      mc mb --ignore-existing local/rendition &&
+      mc anonymous set none local/rendition &&
+      mc cors set local/rendition /tmp/cors.json"
+    restart: "no"
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  minio-data:

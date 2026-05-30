@@ -2,7 +2,11 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.codex/
+.pytest_cache/
 .env
+*.db
 rendition.db
 .git/
 .gitignore
+architecture.md

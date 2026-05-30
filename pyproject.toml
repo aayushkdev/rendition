@@ -9,6 +9,7 @@ dependencies = [
     "black>=26.1.0",
     "fastapi>=0.128.0",
     "pika>=1.3.2",
+    "psycopg[binary]>=3.3.2",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
     "sqlalchemy>=2.0.46",
