@@ -23,4 +23,14 @@ def get_video(video_id: UUID, db: Session = Depends(get_db)):
     if state is None:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    return state
+    return VideoState(
+        video_id=str(state.id),
+        status=state.status.value,
+        renditions=[
+            {
+                "resolution": rendition.resolution,
+                "status": rendition.status.value,
+            }
+            for rendition in state.renditions
+        ],
+    )
