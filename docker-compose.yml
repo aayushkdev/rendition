@@ -13,12 +13,12 @@ services:
       minio-init:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql+psycopg://rendition:rendition@postgres:5432/rendition
-      RABBITMQ_URL: amqp://rendition:rendition@rabbitmq:5672/%2F
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672/%2F
       STORAGE_ENDPOINT: http://minio:9000
-      STORAGE_ACCESS_KEY_ID: rendition
-      STORAGE_SECRET_ACCESS_KEY: rendition-secret
-      STORAGE_BUCKET: rendition
+      STORAGE_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      STORAGE_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET is required}
       STORAGE_REGION: us-east-1
     ports:
       - "8000:8000"
@@ -52,12 +52,12 @@ services:
       minio-init:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql+psycopg://rendition:rendition@postgres:5432/rendition
-      RABBITMQ_URL: amqp://rendition:rendition@rabbitmq:5672/%2F
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672/%2F
       STORAGE_ENDPOINT: http://minio:9000
-      STORAGE_ACCESS_KEY_ID: rendition
-      STORAGE_SECRET_ACCESS_KEY: rendition-secret
-      STORAGE_BUCKET: rendition
+      STORAGE_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      STORAGE_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET is required}
       STORAGE_REGION: us-east-1
     healthcheck:
       test:
@@ -78,15 +78,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: rendition
-      POSTGRES_USER: rendition
-      POSTGRES_PASSWORD: rendition
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rendition -d rendition"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -95,8 +95,8 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     environment:
-      RABBITMQ_DEFAULT_USER: rendition
-      RABBITMQ_DEFAULT_PASS: rendition
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -113,8 +113,8 @@ services:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: rendition
-      MINIO_ROOT_PASSWORD: rendition-secret
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -132,14 +132,18 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET is required}
     volumes:
       - ./deploy/minio/cors.json:/tmp/cors.json:ro
     entrypoint: ["/bin/sh", "-c"]
     command: >
-      "mc alias set local http://minio:9000 rendition rendition-secret &&
-      mc mb --ignore-existing local/rendition &&
-      mc anonymous set none local/rendition &&
-      mc cors set local/rendition /tmp/cors.json"
+      "mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/$${STORAGE_BUCKET} &&
+      mc anonymous set none local/$${STORAGE_BUCKET} &&
+      mc cors set local/$${STORAGE_BUCKET} /tmp/cors.json"
     restart: "no"
 
 volumes:

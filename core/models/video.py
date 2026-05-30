@@ -35,4 +35,5 @@ class Video(Base):
         "Rendition",
         back_populates="video",
         cascade="all, delete-orphan",
+        order_by="Rendition.bitrate.desc()",
     )

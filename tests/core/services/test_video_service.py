@@ -2,7 +2,11 @@ from core.models.enums import ProcessingStatus
 from core.models.job import Job
 from core.models.rendition import Rendition
 from core.models.video import Video
-from core.services.video_service import DEFAULT_RENDITIONS, get_video_state, ingest_video
+from core.services.video_service import (
+    DEFAULT_RENDITIONS,
+    get_video_state,
+    ingest_video,
+)
 
 
 def test_ingest_video_creates_video_renditions_and_jobs(db_session):
