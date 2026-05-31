@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Protocol
 
 import boto3
 from botocore.client import Config
@@ -25,6 +26,40 @@ class MultipartUploadSession:
 class CompletedUploadPart:
     part_number: int
     etag: str
+
+
+class ObjectStorageError(RuntimeError):
+    pass
+
+
+class ObjectStorage(Protocol):
+    @property
+    def bucket(self) -> str: ...
+
+    def create_multipart_upload(
+        self,
+        key: str,
+        content_type: str,
+        part_count: int,
+    ) -> MultipartUploadSession: ...
+
+    def refresh_multipart_upload_urls(
+        self,
+        key: str,
+        upload_id: str,
+        part_count: int,
+    ) -> MultipartUploadSession: ...
+
+    def complete_multipart_upload(
+        self,
+        key: str,
+        upload_id: str,
+        parts: list[CompletedUploadPart],
+    ) -> None: ...
+
+    def abort_multipart_upload(self, key: str, upload_id: str) -> None: ...
+
+    def object_exists(self, key: str) -> bool: ...
 
 
 class S3ObjectStorage:
@@ -79,13 +114,29 @@ class S3ObjectStorage:
         content_type: str,
         part_count: int,
     ) -> MultipartUploadSession:
-        response = self._client.create_multipart_upload(
-            Bucket=self._bucket,
-            Key=key,
-            ContentType=content_type,
-        )
+        try:
+            response = self._client.create_multipart_upload(
+                Bucket=self._bucket,
+                Key=key,
+                ContentType=content_type,
+            )
+        except ClientError as exc:
+            raise ObjectStorageError("failed to create multipart upload") from exc
+
         upload_id = response["UploadId"]
 
+        return self.refresh_multipart_upload_urls(
+            key=key,
+            upload_id=upload_id,
+            part_count=part_count,
+        )
+
+    def refresh_multipart_upload_urls(
+        self,
+        key: str,
+        upload_id: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
         parts = [
             MultipartUploadPart(
                 part_number=part_number,
@@ -116,17 +167,30 @@ class S3ObjectStorage:
         upload_id: str,
         parts: list[CompletedUploadPart],
     ) -> None:
-        self._client.complete_multipart_upload(
-            Bucket=self._bucket,
-            Key=key,
-            UploadId=upload_id,
-            MultipartUpload={
-                "Parts": [
-                    {"PartNumber": part.part_number, "ETag": part.etag}
-                    for part in sorted(parts, key=lambda part: part.part_number)
-                ]
-            },
-        )
+        try:
+            self._client.complete_multipart_upload(
+                Bucket=self._bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={
+                    "Parts": [
+                        {"PartNumber": part.part_number, "ETag": part.etag}
+                        for part in sorted(parts, key=lambda part: part.part_number)
+                    ]
+                },
+            )
+        except ClientError as exc:
+            raise ObjectStorageError("failed to complete multipart upload") from exc
+
+    def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        try:
+            self._client.abort_multipart_upload(
+                Bucket=self._bucket,
+                Key=key,
+                UploadId=upload_id,
+            )
+        except ClientError as exc:
+            raise ObjectStorageError("failed to abort multipart upload") from exc
 
     def object_exists(self, key: str) -> bool:
         try:
@@ -136,7 +200,7 @@ class S3ObjectStorage:
         except ClientError as exc:
             if exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404:
                 return False
-            raise
+            raise ObjectStorageError("failed to check object existence") from exc
         return True
 
 

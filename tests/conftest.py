@@ -21,6 +21,7 @@ class FakeObjectStorage:
 
     def __init__(self):
         self.completed_uploads = []
+        self.aborted_uploads = []
         self.existing_keys = set()
 
     def create_multipart_upload(
@@ -42,6 +43,25 @@ class FakeObjectStorage:
             ],
         )
 
+    def refresh_multipart_upload_urls(
+        self,
+        key: str,
+        upload_id: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
+        return MultipartUploadSession(
+            bucket=self.bucket,
+            key=key,
+            upload_id=upload_id,
+            parts=[
+                MultipartUploadPart(
+                    part_number=part_number,
+                    upload_url=f"http://storage.test/{key}?refreshPartNumber={part_number}",
+                )
+                for part_number in range(1, part_count + 1)
+            ],
+        )
+
     def complete_multipart_upload(
         self,
         key: str,
@@ -55,6 +75,9 @@ class FakeObjectStorage:
 
     def object_exists(self, key: str) -> bool:
         return key in self.existing_keys
+
+    def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        self.aborted_uploads.append({"key": key, "upload_id": upload_id})
 
 
 @pytest.fixture()

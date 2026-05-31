@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     STORAGE_SECRET_ACCESS_KEY: str = "minioadmin"
     STORAGE_BUCKET: str = "rendition"
     STORAGE_REGION: str = "us-east-1"
-    STORAGE_PRESIGNED_URL_EXPIRES_SECONDS: int = 3600
+    STORAGE_PRESIGNED_URL_EXPIRES_SECONDS: int = 21_600
 
 
 settings = Settings()
