@@ -1,5 +1,6 @@
 from uuid import UUID
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
+from api.schemas.video import RenditionState, VideoState
 from core.models.video import Video
 from core.models.rendition import Rendition
 from core.models.job import Job
@@ -42,6 +43,25 @@ def ingest_video(db: Session, source: str) -> Video:
     return video
 
 
-def get_video_state(db: Session, video_id: UUID) -> Video:
-    video = db.query(Video).filter(Video.id == video_id).first()
-    return video
+def get_video_state(db: Session, video_id: UUID) -> VideoState | None:
+    video = (
+        db.query(Video)
+        .options(selectinload(Video.renditions))
+        .filter(Video.id == video_id)
+        .one_or_none()
+    )
+
+    if video is None:
+        return None
+
+    return VideoState(
+        video_id=str(video.id),
+        status=video.status.value,
+        renditions=[
+            RenditionState(
+                resolution=rendition.resolution,
+                status=rendition.status.value,
+            )
+            for rendition in video.renditions
+        ],
+    )

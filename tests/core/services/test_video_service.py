@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from core.models.enums import ProcessingStatus
 from core.models.job import Job
 from core.models.rendition import Rendition
@@ -33,5 +35,12 @@ def test_get_video_state_returns_video_with_renditions(db_session):
 
     state = get_video_state(db_session, video.id)
 
-    assert state.id == video.id
+    assert state.video_id == str(video.id)
+    assert state.status == "pending"
     assert len(state.renditions) == len(DEFAULT_RENDITIONS)
+
+
+def test_get_video_state_returns_none_for_missing_video(db_session):
+    state = get_video_state(db_session, UUID("00000000-0000-0000-0000-000000000000"))
+
+    assert state is None
