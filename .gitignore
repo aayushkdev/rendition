@@ -12,6 +12,15 @@ htmlcov/
 
 .venv/
 .python-version
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/coverage/
+frontend/.vercel/
+frontend/.env*
+frontend/next-env.d.ts
+frontend/*.tsbuildinfo
 
 build/
 dist/
