@@ -35,8 +35,8 @@ def test_get_video_state_returns_video_with_renditions(db_session):
 
     state = get_video_state(db_session, video.id)
 
-    assert state.video_id == str(video.id)
-    assert state.status == "pending"
+    assert state.video_id == video.id
+    assert state.status == ProcessingStatus.pending
     assert len(state.renditions) == len(DEFAULT_RENDITIONS)
 
 

@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+from api.errors import register_exception_handlers
+from api.middleware.request_id import request_id_middleware
 from api.routers import health, root, videos
 
 app = FastAPI(
@@ -6,6 +8,8 @@ app = FastAPI(
     description="Distributed video transcoding system",
 )
 
+app.middleware("http")(request_id_middleware)
+register_exception_handlers(app)
 
 API_PREFIX = "/api/v1"
 

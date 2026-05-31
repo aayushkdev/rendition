@@ -42,6 +42,30 @@ def test_create_video_rejects_invalid_upload_request(client):
     )
 
     assert response.status_code == 422
+    assert response.headers["X-Request-ID"]
+    assert response.json()["error"]["code"] == "validation_error"
+    assert response.json()["error"]["request_id"] == response.headers["X-Request-ID"]
+
+
+def test_create_video_returns_standard_storage_error(client):
+    client.storage.fail_create = True
+
+    response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == {
+        "code": "storage_unavailable",
+        "message": "Storage unavailable",
+        "request_id": response.headers["X-Request-ID"],
+    }
 
 
 def test_get_video_returns_production_response_shape(client, db_session):
@@ -151,10 +175,25 @@ def test_complete_upload_rejects_inactive_upload(client):
     )
 
     assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "upload_not_active",
+        "message": "video upload is not active",
+        "request_id": response.headers["X-Request-ID"],
+    }
 
 
 def test_get_video_returns_404_for_missing_video(client):
-    response = client.get("/api/v1/videos/00000000-0000-0000-0000-000000000000")
+    response = client.get(
+        "/api/v1/videos/00000000-0000-0000-0000-000000000000",
+        headers={"X-Request-ID": "test-request-id"},
+    )
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "Video not found"}
+    assert response.headers["X-Request-ID"] == "test-request-id"
+    assert response.json() == {
+        "error": {
+            "code": "video_not_found",
+            "message": "Video not found",
+            "request_id": "test-request-id",
+        }
+    }

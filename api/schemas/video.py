@@ -1,7 +1,10 @@
+from uuid import UUID
+
 from pydantic import BaseModel, Field, field_validator
 from typing import List
 
 from core.config import settings
+from core.models.enums import ProcessingStatus
 
 
 class VideoCreateRequest(BaseModel):
@@ -45,7 +48,7 @@ class MultipartUploadPart(BaseModel):
 
 
 class VideoCreateResponse(BaseModel):
-    video_id: str
+    video_id: UUID
     bucket: str
     key: str
     upload_id: str
@@ -74,10 +77,10 @@ class VideoUploadRefreshRequest(BaseModel):
 
 class RenditionState(BaseModel):
     resolution: str
-    status: str
+    status: ProcessingStatus
 
 
 class VideoState(BaseModel):
-    video_id: str
-    status: str
+    video_id: UUID
+    status: ProcessingStatus
     renditions: List[RenditionState]

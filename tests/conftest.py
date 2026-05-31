@@ -18,6 +18,7 @@ from core.storage import (
 
 class FakeObjectStorage:
     bucket = "test-bucket"
+    fail_create = False
 
     def __init__(self):
         self.completed_uploads = []
@@ -30,6 +31,11 @@ class FakeObjectStorage:
         content_type: str,
         part_count: int,
     ) -> MultipartUploadSession:
+        if self.fail_create:
+            from core.storage import ObjectStorageError
+
+            raise ObjectStorageError("storage unavailable")
+
         return MultipartUploadSession(
             bucket=self.bucket,
             key=key,
@@ -109,6 +115,8 @@ def client(db_session):
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_object_storage] = lambda: storage
     try:
-        yield TestClient(app)
+        with TestClient(app) as test_client:
+            test_client.storage = storage
+            yield test_client
     finally:
         app.dependency_overrides.clear()

@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from core.db.session import get_db
 from api.schemas.video import (
@@ -10,8 +10,7 @@ from api.schemas.video import (
     VideoUploadRefreshRequest,
 )
 from core.services.video_service import (
-    VideoUploadConflictError,
-    VideoUploadStorageError,
+    VideoNotFoundError,
     abort_video_upload,
     complete_video_upload,
     create_video_upload,
@@ -31,17 +30,14 @@ def create_video(
     db: Session = Depends(get_db),
     storage: ObjectStorage = Depends(get_object_storage),
 ):
-    try:
-        return create_video_upload(
-            db=db,
-            storage=storage,
-            filename=payload.filename,
-            content_type=payload.content_type,
-            size_bytes=payload.size_bytes,
-            part_count=payload.part_count,
-        )
-    except VideoUploadStorageError as exc:
-        raise HTTPException(status_code=502, detail="Storage unavailable") from exc
+    return create_video_upload(
+        db=db,
+        storage=storage,
+        filename=payload.filename,
+        content_type=payload.content_type,
+        size_bytes=payload.size_bytes,
+        part_count=payload.part_count,
+    )
 
 
 @router.get("/{video_id}", response_model=VideoState)
@@ -49,7 +45,7 @@ def get_video(video_id: UUID, db: Session = Depends(get_db)):
     state = get_video_state(db, video_id)
 
     if state is None:
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise VideoNotFoundError("Video not found")
 
     return state
 
@@ -61,15 +57,10 @@ def complete_upload(
     db: Session = Depends(get_db),
     storage: ObjectStorage = Depends(get_object_storage),
 ):
-    try:
-        state = complete_video_upload(db, storage, video_id, payload.parts)
-    except VideoUploadConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except VideoUploadStorageError as exc:
-        raise HTTPException(status_code=502, detail="Storage unavailable") from exc
+    state = complete_video_upload(db, storage, video_id, payload.parts)
 
     if state is None:
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise VideoNotFoundError("Video not found")
 
     return state
 
@@ -81,15 +72,10 @@ def refresh_upload(
     db: Session = Depends(get_db),
     storage: ObjectStorage = Depends(get_object_storage),
 ):
-    try:
-        upload = refresh_video_upload(db, storage, video_id, payload.part_count)
-    except VideoUploadConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except VideoUploadStorageError as exc:
-        raise HTTPException(status_code=502, detail="Storage unavailable") from exc
+    upload = refresh_video_upload(db, storage, video_id, payload.part_count)
 
     if upload is None:
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise VideoNotFoundError("Video not found")
 
     return upload
 
@@ -100,12 +86,7 @@ def abort_upload(
     db: Session = Depends(get_db),
     storage: ObjectStorage = Depends(get_object_storage),
 ):
-    try:
-        aborted = abort_video_upload(db, storage, video_id)
-    except VideoUploadConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except VideoUploadStorageError as exc:
-        raise HTTPException(status_code=502, detail="Storage unavailable") from exc
+    aborted = abort_video_upload(db, storage, video_id)
 
     if aborted is None:
-        raise HTTPException(status_code=404, detail="Video not found")
+        raise VideoNotFoundError("Video not found")

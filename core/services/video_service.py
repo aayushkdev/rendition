@@ -33,6 +33,10 @@ class VideoUploadStorageError(VideoUploadError):
     pass
 
 
+class VideoNotFoundError(LookupError):
+    pass
+
+
 DEFAULT_RENDITIONS = [
     {"resolution": "1080p", "bitrate": 5_000_000},
     {"resolution": "720p", "bitrate": 2_500_000},
@@ -132,7 +136,7 @@ def create_video_upload(
 
     db.commit()
     return VideoCreateResponse(
-        video_id=str(video.id),
+        video_id=video.id,
         bucket=upload.bucket,
         key=upload.key,
         upload_id=upload.upload_id,
@@ -230,7 +234,7 @@ def refresh_video_upload(
         raise VideoUploadStorageError("storage upload URL refresh failed") from exc
 
     return VideoCreateResponse(
-        video_id=str(video.id),
+        video_id=video.id,
         bucket=upload.bucket,
         key=upload.key,
         upload_id=upload.upload_id,
@@ -286,12 +290,12 @@ def get_video_state(db: Session, video_id: UUID) -> VideoState | None:
         return None
 
     return VideoState(
-        video_id=str(video.id),
-        status=video.status.value,
+        video_id=video.id,
+        status=video.status,
         renditions=[
             RenditionState(
                 resolution=rendition.resolution,
-                status=rendition.status.value,
+                status=rendition.status,
             )
             for rendition in video.renditions
         ],
