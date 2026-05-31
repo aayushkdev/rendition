@@ -1,5 +1,3 @@
-from typing import Literal
-
 from pydantic import Field, model_validator
 from sqlalchemy.engine import URL
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,7 +16,7 @@ class Settings(BaseSettings):
     RABBITMQ_CONNECT_RETRY_COUNT: int = Field(default=30, ge=1)
 
     STORAGE_ENDPOINT: str = "http://localhost:9000"
-    STORAGE_PUBLIC_ENDPOINT: str | None = None
+    STORAGE_PRESIGN_ENDPOINT: str | None = None
     STORAGE_ACCESS_KEY_ID: str = "minioadmin"
     STORAGE_SECRET_ACCESS_KEY: str = "minioadmin"
     STORAGE_BUCKET: str = "rendition"
@@ -31,8 +29,7 @@ class Settings(BaseSettings):
 
     WORKER_JOB_RETRY_COUNT: int = Field(default=3, ge=0)
 
-    PLAYBACK_ACCESS_MODE: Literal["public", "private"] = "private"
-    ENVIRONMENT: Literal["local", "test", "production"] = "local"
+    ENVIRONMENT: str = "local"
 
     @property
     def DATABASE_URL(self) -> str:
@@ -69,9 +66,6 @@ class Settings(BaseSettings):
             }
             if sensitive_values & default_secret_values:
                 raise ValueError("production settings must not use default secrets")
-
-            if self.STORAGE_PUBLIC_ENDPOINT is None:
-                raise ValueError("production settings require STORAGE_PUBLIC_ENDPOINT")
 
         return self
 

@@ -204,6 +204,7 @@ def test_complete_upload_rejects_storage_metadata_mismatch(client, db_session):
     upload_session = db_session.query(UploadSession).one()
     assert upload_session.status == UploadStatus.failed
     assert upload_session.error == "completed upload size mismatch"
+    assert client.storage.deleted_objects == [upload_session.object_key]
     assert response.json()["error"] == {
         "code": "storage_unavailable",
         "message": "Storage unavailable",

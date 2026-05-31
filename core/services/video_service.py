@@ -89,6 +89,35 @@ def _get_active_upload_session(db: Session, video: Video) -> UploadSession:
     return upload_session
 
 
+def _get_video_for_upload_completion(db: Session, video_id: UUID) -> Video | None:
+    return (
+        db.query(Video)
+        .filter(Video.id == video_id)
+        .with_for_update(of=Video)
+        .one_or_none()
+    )
+
+
+def _get_active_upload_session_for_update(db: Session, video: Video) -> UploadSession:
+    if video.status != ProcessingStatus.uploading:
+        raise VideoUploadConflictError("video upload is not active")
+
+    upload_session = (
+        db.query(UploadSession)
+        .filter(
+            UploadSession.video_id == video.id,
+            UploadSession.status == UploadStatus.active,
+        )
+        .with_for_update(of=UploadSession)
+        .one_or_none()
+    )
+
+    if upload_session is None:
+        raise VideoUploadConflictError("video upload is missing multipart state")
+
+    return upload_session
+
+
 def _validate_completed_upload_metadata(
     storage: ObjectStorage,
     upload_session: UploadSession,
@@ -103,6 +132,13 @@ def _validate_completed_upload_metadata(
 
     if metadata.content_type != upload_session.content_type:
         raise VideoUploadStorageError("completed upload content type mismatch")
+
+
+def _delete_invalid_completed_upload(
+    storage: ObjectStorage,
+    upload_session: UploadSession,
+) -> None:
+    storage.delete_object(upload_session.object_key)
 
 
 def create_video_upload(
@@ -183,17 +219,12 @@ def complete_video_upload(
     video_id: UUID,
     parts: list[CompletedUploadPartSchema],
 ) -> VideoState | None:
-    video = (
-        db.query(Video)
-        .options(selectinload(Video.renditions))
-        .filter(Video.id == video_id)
-        .one_or_none()
-    )
+    video = _get_video_for_upload_completion(db, video_id)
 
     if video is None:
         return None
 
-    upload_session = _get_active_upload_session(db, video)
+    upload_session = _get_active_upload_session_for_update(db, video)
 
     try:
         storage.complete_multipart_upload(
@@ -214,6 +245,16 @@ def complete_video_upload(
         db.commit()
         raise VideoUploadStorageError("storage upload completion failed") from exc
     except VideoUploadStorageError as exc:
+        try:
+            _delete_invalid_completed_upload(storage, upload_session)
+        except ObjectStorageError as cleanup_exc:
+            upload_session.status = UploadStatus.failed
+            upload_session.error = f"{exc}; cleanup failed"
+            db.commit()
+            raise VideoUploadStorageError(
+                "storage upload cleanup failed"
+            ) from cleanup_exc
+
         upload_session.status = UploadStatus.failed
         upload_session.error = str(exc)
         db.commit()

@@ -54,17 +54,18 @@ class FakeS3Client:
     def download_file(self, **kwargs):
         self.calls.append(("download_file", kwargs))
 
+    def delete_object(self, **kwargs):
+        self.calls.append(("delete_object", kwargs))
+
     def head_object(self, **kwargs):
         self.calls.append(("head_object", kwargs))
         return self.head_response
 
 
-def make_storage(playback_access_mode="private", public_endpoint_url=None):
+def make_storage():
     storage = S3ObjectStorage.__new__(S3ObjectStorage)
     storage._bucket = "rendition"
     storage._expires_in = 3600
-    storage._public_endpoint_url = public_endpoint_url
-    storage._playback_access_mode = playback_access_mode
     storage._client = FakeS3Client()
     storage._presign_client = FakeS3Client()
     return storage
@@ -203,8 +204,24 @@ def test_upload_and_download_object_helpers_call_s3():
     ]
 
 
-def test_private_playback_url_uses_presigned_download_url():
-    storage = make_storage(playback_access_mode="private")
+def test_delete_object_calls_s3():
+    storage = make_storage()
+
+    storage.delete_object("source/video/input.mp4")
+
+    assert storage._client.calls == [
+        (
+            "delete_object",
+            {
+                "Bucket": "rendition",
+                "Key": "source/video/input.mp4",
+            },
+        )
+    ]
+
+
+def test_playback_url_uses_presigned_download_url():
+    storage = make_storage()
 
     url = storage.generate_playback_url("hls/video/master.m3u8")
 
@@ -219,17 +236,6 @@ def test_private_playback_url_uses_presigned_download_url():
             },
         )
     ]
-
-
-def test_public_playback_url_uses_public_endpoint_as_bucket_base_url():
-    storage = make_storage(
-        playback_access_mode="public",
-        public_endpoint_url="https://cdn.example.com",
-    )
-
-    url = storage.generate_playback_url("hls/video/master file.m3u8")
-
-    assert url == "https://cdn.example.com/hls/video/master%20file.m3u8"
 
 
 def test_get_object_metadata_returns_head_object_metadata():

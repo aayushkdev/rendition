@@ -24,6 +24,7 @@ class FakeObjectStorage:
     def __init__(self):
         self.completed_uploads = []
         self.aborted_uploads = []
+        self.deleted_objects = []
         self.metadata_by_key = {}
         self.completed_content_length = 12_345
         self.completed_content_type = "video/mp4"
@@ -93,6 +94,10 @@ class FakeObjectStorage:
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
         self.aborted_uploads.append({"key": key, "upload_id": upload_id})
+
+    def delete_object(self, key: str) -> None:
+        self.deleted_objects.append(key)
+        self.metadata_by_key.pop(key, None)
 
 
 @pytest.fixture()

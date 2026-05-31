@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import Protocol
-from urllib.parse import quote
 
 import boto3
 from boto3.exceptions import S3UploadFailedError
@@ -89,6 +88,8 @@ class ObjectStorage(Protocol):
 
     def download_file(self, key: str, local_path: str) -> None: ...
 
+    def delete_object(self, key: str) -> None: ...
+
     def generate_presigned_download_url(self, key: str) -> str: ...
 
     def generate_playback_url(self, key: str) -> str: ...
@@ -98,18 +99,15 @@ class S3ObjectStorage:
     def __init__(
         self,
         endpoint_url: str,
-        public_endpoint_url: str | None,
+        presign_endpoint_url: str | None,
         access_key_id: str,
         secret_access_key: str,
         region_name: str,
         bucket: str,
         presigned_url_expires_seconds: int,
-        playback_access_mode: str,
     ) -> None:
         self._bucket = bucket
         self._expires_in = presigned_url_expires_seconds
-        self._public_endpoint_url = public_endpoint_url
-        self._playback_access_mode = playback_access_mode
         self._client = self._build_client(
             endpoint_url,
             access_key_id,
@@ -117,7 +115,7 @@ class S3ObjectStorage:
             region_name,
         )
         self._presign_client = self._build_client(
-            public_endpoint_url or endpoint_url,
+            presign_endpoint_url or endpoint_url,
             access_key_id,
             secret_access_key,
             region_name,
@@ -301,6 +299,12 @@ class S3ObjectStorage:
         except (BotoCoreError, ClientError, S3UploadFailedError) as exc:
             raise ObjectStorageError("failed to download object") from exc
 
+    def delete_object(self, key: str) -> None:
+        try:
+            self._client.delete_object(Bucket=self._bucket, Key=key)
+        except (BotoCoreError, ClientError) as exc:
+            raise ObjectStorageError("failed to delete object") from exc
+
     def generate_presigned_download_url(self, key: str) -> str:
         try:
             return self._presign_client.generate_presigned_url(
@@ -312,24 +316,16 @@ class S3ObjectStorage:
             raise ObjectStorageError("failed to create download URL") from exc
 
     def generate_playback_url(self, key: str) -> str:
-        if self._playback_access_mode == "private":
-            return self.generate_presigned_download_url(key)
-
-        if self._public_endpoint_url is None:
-            raise ObjectStorageError("public playback endpoint is not configured")
-
-        encoded_key = quote(key, safe="/")
-        return f"{self._public_endpoint_url.rstrip('/')}/{encoded_key}"
+        return self.generate_presigned_download_url(key)
 
 
 def get_object_storage() -> S3ObjectStorage:
     return S3ObjectStorage(
         endpoint_url=settings.STORAGE_ENDPOINT,
-        public_endpoint_url=settings.STORAGE_PUBLIC_ENDPOINT,
+        presign_endpoint_url=settings.STORAGE_PRESIGN_ENDPOINT,
         access_key_id=settings.STORAGE_ACCESS_KEY_ID,
         secret_access_key=settings.STORAGE_SECRET_ACCESS_KEY,
         region_name=settings.STORAGE_REGION,
         bucket=settings.STORAGE_BUCKET,
         presigned_url_expires_seconds=settings.STORAGE_PRESIGNED_URL_EXPIRES_SECONDS,
-        playback_access_mode=settings.PLAYBACK_ACCESS_MODE,
     )
