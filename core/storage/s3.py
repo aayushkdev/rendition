@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import quote
 
 import boto3
+from boto3.exceptions import S3UploadFailedError
 from botocore.client import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from core.config import settings
 
@@ -26,6 +28,12 @@ class MultipartUploadSession:
 class CompletedUploadPart:
     part_number: int
     etag: str
+
+
+@dataclass(frozen=True)
+class ObjectMetadata:
+    content_length: int
+    content_type: str | None
 
 
 class ObjectStorageError(RuntimeError):
@@ -61,6 +69,30 @@ class ObjectStorage(Protocol):
 
     def object_exists(self, key: str) -> bool: ...
 
+    def get_object_metadata(self, key: str) -> ObjectMetadata | None: ...
+
+    def upload_file(
+        self,
+        local_path: str,
+        key: str,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None: ...
+
+    def upload_bytes(
+        self,
+        key: str,
+        body: bytes,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None: ...
+
+    def download_file(self, key: str, local_path: str) -> None: ...
+
+    def generate_presigned_download_url(self, key: str) -> str: ...
+
+    def generate_playback_url(self, key: str) -> str: ...
+
 
 class S3ObjectStorage:
     def __init__(
@@ -72,9 +104,12 @@ class S3ObjectStorage:
         region_name: str,
         bucket: str,
         presigned_url_expires_seconds: int,
+        playback_access_mode: str,
     ) -> None:
         self._bucket = bucket
         self._expires_in = presigned_url_expires_seconds
+        self._public_endpoint_url = public_endpoint_url
+        self._playback_access_mode = playback_access_mode
         self._client = self._build_client(
             endpoint_url,
             access_key_id,
@@ -120,7 +155,7 @@ class S3ObjectStorage:
                 Key=key,
                 ContentType=content_type,
             )
-        except ClientError as exc:
+        except (BotoCoreError, ClientError) as exc:
             raise ObjectStorageError("failed to create multipart upload") from exc
 
         upload_id = response["UploadId"]
@@ -137,22 +172,25 @@ class S3ObjectStorage:
         upload_id: str,
         part_count: int,
     ) -> MultipartUploadSession:
-        parts = [
-            MultipartUploadPart(
-                part_number=part_number,
-                upload_url=self._presign_client.generate_presigned_url(
-                    "upload_part",
-                    Params={
-                        "Bucket": self._bucket,
-                        "Key": key,
-                        "UploadId": upload_id,
-                        "PartNumber": part_number,
-                    },
-                    ExpiresIn=self._expires_in,
-                ),
-            )
-            for part_number in range(1, part_count + 1)
-        ]
+        try:
+            parts = [
+                MultipartUploadPart(
+                    part_number=part_number,
+                    upload_url=self._presign_client.generate_presigned_url(
+                        "upload_part",
+                        Params={
+                            "Bucket": self._bucket,
+                            "Key": key,
+                            "UploadId": upload_id,
+                            "PartNumber": part_number,
+                        },
+                        ExpiresIn=self._expires_in,
+                    ),
+                )
+                for part_number in range(1, part_count + 1)
+            ]
+        except (BotoCoreError, ClientError) as exc:
+            raise ObjectStorageError("failed to create upload URLs") from exc
 
         return MultipartUploadSession(
             bucket=self._bucket,
@@ -179,7 +217,7 @@ class S3ObjectStorage:
                     ]
                 },
             )
-        except ClientError as exc:
+        except (BotoCoreError, ClientError) as exc:
             raise ObjectStorageError("failed to complete multipart upload") from exc
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
@@ -189,19 +227,99 @@ class S3ObjectStorage:
                 Key=key,
                 UploadId=upload_id,
             )
-        except ClientError as exc:
+        except (BotoCoreError, ClientError) as exc:
             raise ObjectStorageError("failed to abort multipart upload") from exc
 
     def object_exists(self, key: str) -> bool:
+        return self.get_object_metadata(key) is not None
+
+    def get_object_metadata(self, key: str) -> ObjectMetadata | None:
         try:
-            self._client.head_object(Bucket=self._bucket, Key=key)
+            response = self._client.head_object(Bucket=self._bucket, Key=key)
         except self._client.exceptions.NoSuchKey:
-            return False
+            return None
         except ClientError as exc:
             if exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404:
-                return False
+                return None
             raise ObjectStorageError("failed to check object existence") from exc
-        return True
+        except BotoCoreError as exc:
+            raise ObjectStorageError("failed to check object existence") from exc
+        return ObjectMetadata(
+            content_length=response["ContentLength"],
+            content_type=response.get("ContentType"),
+        )
+
+    def upload_file(
+        self,
+        local_path: str,
+        key: str,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None:
+        extra_args = {"ContentType": content_type}
+        if cache_control is not None:
+            extra_args["CacheControl"] = cache_control
+
+        try:
+            self._client.upload_file(
+                Filename=local_path,
+                Bucket=self._bucket,
+                Key=key,
+                ExtraArgs=extra_args,
+            )
+        except (BotoCoreError, ClientError, S3UploadFailedError) as exc:
+            raise ObjectStorageError("failed to upload object") from exc
+
+    def upload_bytes(
+        self,
+        key: str,
+        body: bytes,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None:
+        put_args = {
+            "Bucket": self._bucket,
+            "Key": key,
+            "Body": body,
+            "ContentType": content_type,
+        }
+        if cache_control is not None:
+            put_args["CacheControl"] = cache_control
+
+        try:
+            self._client.put_object(**put_args)
+        except (BotoCoreError, ClientError) as exc:
+            raise ObjectStorageError("failed to upload object") from exc
+
+    def download_file(self, key: str, local_path: str) -> None:
+        try:
+            self._client.download_file(
+                Bucket=self._bucket,
+                Key=key,
+                Filename=local_path,
+            )
+        except (BotoCoreError, ClientError, S3UploadFailedError) as exc:
+            raise ObjectStorageError("failed to download object") from exc
+
+    def generate_presigned_download_url(self, key: str) -> str:
+        try:
+            return self._presign_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket, "Key": key},
+                ExpiresIn=self._expires_in,
+            )
+        except (BotoCoreError, ClientError) as exc:
+            raise ObjectStorageError("failed to create download URL") from exc
+
+    def generate_playback_url(self, key: str) -> str:
+        if self._playback_access_mode == "private":
+            return self.generate_presigned_download_url(key)
+
+        if self._public_endpoint_url is None:
+            raise ObjectStorageError("public playback endpoint is not configured")
+
+        encoded_key = quote(key, safe="/")
+        return f"{self._public_endpoint_url.rstrip('/')}/{encoded_key}"
 
 
 def get_object_storage() -> S3ObjectStorage:
@@ -213,4 +331,5 @@ def get_object_storage() -> S3ObjectStorage:
         region_name=settings.STORAGE_REGION,
         bucket=settings.STORAGE_BUCKET,
         presigned_url_expires_seconds=settings.STORAGE_PRESIGNED_URL_EXPIRES_SECONDS,
+        playback_access_mode=settings.PLAYBACK_ACCESS_MODE,
     )

@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from uuid import UUID
+
 from sqlalchemy.orm import Session, selectinload
+
 from api.schemas.video import (
     CompletedUploadPart as CompletedUploadPartSchema,
     MultipartUploadPart,
@@ -18,6 +20,7 @@ from core.storage import (
     CompletedUploadPart as StorageCompletedUploadPart,
     ObjectStorage,
     ObjectStorageError,
+    build_source_key,
 )
 
 
@@ -42,10 +45,6 @@ DEFAULT_RENDITIONS = [
     {"resolution": "720p", "bitrate": 2_500_000},
     {"resolution": "480p", "bitrate": 1_000_000},
 ]
-
-
-def _build_source_key(video_id: UUID, filename: str) -> str:
-    return f"source/{video_id}/{filename}"
 
 
 def _create_renditions_and_jobs(db: Session, video: Video, max_attempts: int) -> None:
@@ -90,6 +89,22 @@ def _get_active_upload_session(db: Session, video: Video) -> UploadSession:
     return upload_session
 
 
+def _validate_completed_upload_metadata(
+    storage: ObjectStorage,
+    upload_session: UploadSession,
+) -> None:
+    metadata = storage.get_object_metadata(upload_session.object_key)
+
+    if metadata is None:
+        raise VideoUploadStorageError("completed upload object was not found")
+
+    if metadata.content_length != upload_session.size_bytes:
+        raise VideoUploadStorageError("completed upload size mismatch")
+
+    if metadata.content_type != upload_session.content_type:
+        raise VideoUploadStorageError("completed upload content type mismatch")
+
+
 def create_video_upload(
     db: Session,
     storage: ObjectStorage,
@@ -109,7 +124,7 @@ def create_video_upload(
     db.add(video)
     db.flush()
 
-    key = _build_source_key(video.id, filename)
+    key = build_source_key(video.id, filename)
     try:
         upload = storage.create_multipart_upload(
             key=key,
@@ -192,13 +207,17 @@ def complete_video_upload(
                 for part in parts
             ],
         )
-        if not storage.object_exists(upload_session.object_key):
-            raise VideoUploadStorageError("completed upload object was not found")
+        _validate_completed_upload_metadata(storage, upload_session)
     except ObjectStorageError as exc:
         upload_session.status = UploadStatus.failed
         upload_session.error = "storage upload completion failed"
         db.commit()
         raise VideoUploadStorageError("storage upload completion failed") from exc
+    except VideoUploadStorageError as exc:
+        upload_session.status = UploadStatus.failed
+        upload_session.error = str(exc)
+        db.commit()
+        raise
 
     video.status = ProcessingStatus.pending
     video.uploaded_at = datetime.now(timezone.utc)

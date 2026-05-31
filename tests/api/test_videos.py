@@ -182,6 +182,35 @@ def test_complete_upload_rejects_inactive_upload(client):
     }
 
 
+def test_complete_upload_rejects_storage_metadata_mismatch(client, db_session):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+    client.storage.completed_content_length = 999
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/complete",
+        json={"parts": [{"part_number": 1, "etag": "etag-1"}]},
+    )
+
+    assert response.status_code == 502
+    upload_session = db_session.query(UploadSession).one()
+    assert upload_session.status == UploadStatus.failed
+    assert upload_session.error == "completed upload size mismatch"
+    assert response.json()["error"] == {
+        "code": "storage_unavailable",
+        "message": "Storage unavailable",
+        "request_id": response.headers["X-Request-ID"],
+    }
+
+
 def test_get_video_returns_404_for_missing_video(client):
     response = client.get(
         "/api/v1/videos/00000000-0000-0000-0000-000000000000",

@@ -12,6 +12,7 @@ from core.storage import (
     CompletedUploadPart,
     MultipartUploadPart,
     MultipartUploadSession,
+    ObjectMetadata,
     get_object_storage,
 )
 
@@ -23,7 +24,9 @@ class FakeObjectStorage:
     def __init__(self):
         self.completed_uploads = []
         self.aborted_uploads = []
-        self.existing_keys = set()
+        self.metadata_by_key = {}
+        self.completed_content_length = 12_345
+        self.completed_content_type = "video/mp4"
 
     def create_multipart_upload(
         self,
@@ -77,10 +80,16 @@ class FakeObjectStorage:
         self.completed_uploads.append(
             {"key": key, "upload_id": upload_id, "parts": parts}
         )
-        self.existing_keys.add(key)
+        self.metadata_by_key[key] = ObjectMetadata(
+            content_length=self.completed_content_length,
+            content_type=self.completed_content_type,
+        )
 
     def object_exists(self, key: str) -> bool:
-        return key in self.existing_keys
+        return key in self.metadata_by_key
+
+    def get_object_metadata(self, key: str) -> ObjectMetadata | None:
+        return self.metadata_by_key.get(key)
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
         self.aborted_uploads.append({"key": key, "upload_id": upload_id})
