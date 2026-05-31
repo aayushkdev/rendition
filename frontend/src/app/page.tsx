@@ -1,3 +1,5 @@
+import { VideoFeed } from "@/components/feed/video-feed";
+
 export default function Home() {
-  return <main className="min-h-screen bg-background" />;
+  return <VideoFeed />;
 }
