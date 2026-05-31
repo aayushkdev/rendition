@@ -32,6 +32,10 @@ class VideoUploadConflictError(VideoUploadError):
     pass
 
 
+class VideoUploadValidationError(VideoUploadError):
+    pass
+
+
 class VideoUploadStorageError(VideoUploadError):
     pass
 
@@ -141,6 +145,19 @@ def _delete_invalid_completed_upload(
     storage.delete_object(upload_session.object_key)
 
 
+def _validate_completed_upload_parts(
+    upload_session: UploadSession,
+    parts: list[CompletedUploadPartSchema],
+) -> None:
+    expected_part_numbers = list(range(1, upload_session.part_count + 1))
+    actual_part_numbers = [part.part_number for part in parts]
+
+    if actual_part_numbers != expected_part_numbers:
+        raise VideoUploadValidationError(
+            "upload parts must be ordered and complete from 1 to part_count"
+        )
+
+
 def create_video_upload(
     db: Session,
     storage: ObjectStorage,
@@ -225,6 +242,7 @@ def complete_video_upload(
         return None
 
     upload_session = _get_active_upload_session_for_update(db, video)
+    _validate_completed_upload_parts(upload_session, parts)
 
     try:
         storage.complete_multipart_upload(
@@ -283,6 +301,9 @@ def refresh_video_upload(
         return None
 
     upload_session = _get_active_upload_session(db, video)
+
+    if part_count != upload_session.part_count:
+        raise VideoUploadValidationError("refresh part count must match upload session")
 
     try:
         upload = storage.refresh_multipart_upload_urls(

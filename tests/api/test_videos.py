@@ -81,7 +81,9 @@ def test_get_video_returns_production_response_shape(client, db_session):
     video_id = create_response.json()["video_id"]
     complete_response = client.post(
         f"/api/v1/videos/{video_id}/upload/complete",
-        json={"parts": [{"part_number": 1, "etag": "etag-1"}]},
+        json={
+            "parts": [{"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
+        },
     )
 
     assert complete_response.status_code == 200
@@ -111,7 +113,7 @@ def test_refresh_upload_returns_new_part_urls(client):
             "filename": "video.mp4",
             "content_type": "video/mp4",
             "size_bytes": 12_345,
-            "part_count": 1,
+            "part_count": 2,
         },
     )
     video_id = create_response.json()["video_id"]
@@ -127,6 +129,31 @@ def test_refresh_upload_returns_new_part_urls(client):
     assert payload["upload_id"] == "test-upload-id"
     assert [part["part_number"] for part in payload["parts"]] == [1, 2]
     assert "refreshPartNumber=1" in payload["parts"][0]["upload_url"]
+
+
+def test_refresh_upload_rejects_part_count_mismatch(client):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 2,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/refresh",
+        json={"part_count": 1},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == {
+        "code": "invalid_upload_parts",
+        "message": "refresh part count must match upload session",
+        "request_id": response.headers["X-Request-ID"],
+    }
 
 
 def test_abort_upload_marks_video_failed(client, db_session):
@@ -166,12 +193,16 @@ def test_complete_upload_rejects_inactive_upload(client):
     video_id = create_response.json()["video_id"]
     client.post(
         f"/api/v1/videos/{video_id}/upload/complete",
-        json={"parts": [{"part_number": 1, "etag": "etag-1"}]},
+        json={
+            "parts": [{"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
+        },
     )
 
     response = client.post(
         f"/api/v1/videos/{video_id}/upload/complete",
-        json={"parts": [{"part_number": 1, "etag": "etag-1"}]},
+        json={
+            "parts": [{"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
+        },
     )
 
     assert response.status_code == 409
@@ -180,6 +211,110 @@ def test_complete_upload_rejects_inactive_upload(client):
         "message": "video upload is not active",
         "request_id": response.headers["X-Request-ID"],
     }
+
+
+def test_complete_upload_rejects_out_of_order_parts(client, db_session):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 2,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/complete",
+        json={
+            "parts": [
+                {"part_number": 2, "etag": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+                {"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert db_session.query(UploadSession).one().status == UploadStatus.active
+    assert client.storage.completed_uploads == []
+    assert response.json()["error"] == {
+        "code": "invalid_upload_parts",
+        "message": "upload parts must be ordered and complete from 1 to part_count",
+        "request_id": response.headers["X-Request-ID"],
+    }
+
+
+def test_complete_upload_rejects_missing_parts(client):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 2,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/complete",
+        json={
+            "parts": [{"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
+        },
+    )
+
+    assert response.status_code == 400
+    assert client.storage.completed_uploads == []
+    assert response.json()["error"]["code"] == "invalid_upload_parts"
+
+
+def test_complete_upload_rejects_duplicate_parts(client):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 2,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/complete",
+        json={
+            "parts": [
+                {"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                {"part_number": 1, "etag": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert client.storage.completed_uploads == []
+    assert response.json()["error"]["code"] == "invalid_upload_parts"
+
+
+def test_complete_upload_rejects_blank_etag(client):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/complete",
+        json={"parts": [{"part_number": 1, "etag": "   "}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
 
 
 def test_complete_upload_rejects_storage_metadata_mismatch(client, db_session):
@@ -197,7 +332,9 @@ def test_complete_upload_rejects_storage_metadata_mismatch(client, db_session):
 
     response = client.post(
         f"/api/v1/videos/{video_id}/upload/complete",
-        json={"parts": [{"part_number": 1, "etag": "etag-1"}]},
+        json={
+            "parts": [{"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
+        },
     )
 
     assert response.status_code == 502

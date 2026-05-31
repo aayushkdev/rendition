@@ -1,10 +1,13 @@
 from uuid import UUID
+import re
 
 from pydantic import BaseModel, Field, field_validator
 from typing import List
 
 from core.config import settings
 from core.models.enums import ProcessingStatus
+
+PART_ETAG_PATTERN = re.compile(r'^(?:"[A-Fa-f0-9]{32}"|[A-Fa-f0-9]{32})$')
 
 
 class VideoCreateRequest(BaseModel):
@@ -57,7 +60,14 @@ class VideoCreateResponse(BaseModel):
 
 class CompletedUploadPart(BaseModel):
     part_number: int = Field(ge=1)
-    etag: str = Field(min_length=1)
+    etag: str = Field(min_length=1, max_length=1024)
+
+    @field_validator("etag")
+    @classmethod
+    def validate_etag(cls, value: str) -> str:
+        if not PART_ETAG_PATTERN.fullmatch(value):
+            raise ValueError("etag must be a 32-character hex value")
+        return value
 
 
 class VideoUploadCompleteRequest(BaseModel):

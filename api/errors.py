@@ -9,6 +9,7 @@ from core.services.video_service import (
     VideoNotFoundError,
     VideoUploadConflictError,
     VideoUploadStorageError,
+    VideoUploadValidationError,
 )
 
 
@@ -72,6 +73,18 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=502,
             code="storage_unavailable",
             message="Storage unavailable",
+        )
+
+    @app.exception_handler(VideoUploadValidationError)
+    async def video_upload_validation_handler(
+        request: Request,
+        exc: VideoUploadValidationError,
+    ) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=400,
+            code="invalid_upload_parts",
+            message=str(exc),
         )
 
     @app.exception_handler(StarletteHTTPException)

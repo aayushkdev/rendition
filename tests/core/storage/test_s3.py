@@ -113,8 +113,14 @@ def test_complete_multipart_upload_sorts_parts():
         key="source/video/input.mp4",
         upload_id="upload-123",
         parts=[
-            CompletedUploadPart(part_number=2, etag="etag-2"),
-            CompletedUploadPart(part_number=1, etag="etag-1"),
+            CompletedUploadPart(
+                part_number=2,
+                etag="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+            CompletedUploadPart(
+                part_number=1,
+                etag="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
         ],
     )
 
@@ -127,8 +133,14 @@ def test_complete_multipart_upload_sorts_parts():
                 "UploadId": "upload-123",
                 "MultipartUpload": {
                     "Parts": [
-                        {"PartNumber": 1, "ETag": "etag-1"},
-                        {"PartNumber": 2, "ETag": "etag-2"},
+                        {
+                            "PartNumber": 1,
+                            "ETag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        },
+                        {
+                            "PartNumber": 2,
+                            "ETag": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        },
                     ]
                 },
             },
