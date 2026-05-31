@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, DateTime, Enum, String
+from sqlalchemy import Column, DateTime, Enum, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -18,6 +18,11 @@ class Video(Base):
     )
 
     source = Column(String, nullable=False)
+    source_bucket = Column(String, nullable=True)
+    source_filename = Column(String, nullable=True)
+    source_content_type = Column(String, nullable=True)
+    source_size_bytes = Column(Integer, nullable=True)
+    multipart_upload_id = Column(String, nullable=True)
 
     status = Column(
         Enum(ProcessingStatus, name="processing_status"),
@@ -30,6 +35,8 @@ class Video(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+    uploaded_at = Column(DateTime(timezone=True), nullable=True)
 
     renditions = relationship(
         "Rendition",
