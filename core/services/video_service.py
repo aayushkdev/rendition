@@ -8,10 +8,12 @@ from api.schemas.video import (
     VideoCreateResponse,
     VideoState,
 )
+from core.config import settings
 from core.models.video import Video
 from core.models.rendition import Rendition
 from core.models.job import Job
-from core.models.enums import ProcessingStatus
+from core.models.enums import ProcessingStatus, UploadStatus
+from core.models.upload_session import UploadSession
 from core.storage import (
     CompletedUploadPart as StorageCompletedUploadPart,
     ObjectStorage,
@@ -42,7 +44,7 @@ def _build_source_key(video_id: UUID, filename: str) -> str:
     return f"source/{video_id}/{filename}"
 
 
-def _create_renditions_and_jobs(db: Session, video: Video) -> None:
+def _create_renditions_and_jobs(db: Session, video: Video, max_attempts: int) -> None:
     if video.renditions:
         return
 
@@ -60,18 +62,28 @@ def _create_renditions_and_jobs(db: Session, video: Video) -> None:
             video_id=video.id,
             rendition_id=rendition.id,
             status=ProcessingStatus.pending,
+            max_attempts=max_attempts,
         )
         db.add(job)
 
 
-def _require_active_upload(video: Video) -> tuple[str, str]:
+def _get_active_upload_session(db: Session, video: Video) -> UploadSession:
     if video.status != ProcessingStatus.uploading:
         raise VideoUploadConflictError("video upload is not active")
 
-    if not video.source or not video.multipart_upload_id:
+    upload_session = (
+        db.query(UploadSession)
+        .filter(
+            UploadSession.video_id == video.id,
+            UploadSession.status == UploadStatus.active,
+        )
+        .one_or_none()
+    )
+
+    if upload_session is None:
         raise VideoUploadConflictError("video upload is missing multipart state")
 
-    return video.source, video.multipart_upload_id
+    return upload_session
 
 
 def create_video_upload(
@@ -83,7 +95,7 @@ def create_video_upload(
     part_count: int,
 ) -> VideoCreateResponse:
     video = Video(
-        source="",
+        source=f"source/pending/{filename}",
         source_bucket=storage.bucket,
         source_filename=filename,
         source_content_type=content_type,
@@ -105,7 +117,18 @@ def create_video_upload(
         raise VideoUploadStorageError("storage upload creation failed") from exc
 
     video.source = key
-    video.multipart_upload_id = upload.upload_id
+    upload_session = UploadSession(
+        video_id=video.id,
+        bucket=upload.bucket,
+        object_key=upload.key,
+        object_upload_id=upload.upload_id,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=size_bytes,
+        part_count=part_count,
+        status=UploadStatus.active,
+    )
+    db.add(upload_session)
 
     db.commit()
     return VideoCreateResponse(
@@ -128,7 +151,7 @@ def ingest_video(db: Session, source: str) -> Video:
     db.add(video)
     db.flush()
 
-    _create_renditions_and_jobs(db, video)
+    _create_renditions_and_jobs(db, video, max_attempts=settings.WORKER_JOB_RETRY_COUNT)
 
     db.commit()
     db.refresh(video)
@@ -151,12 +174,12 @@ def complete_video_upload(
     if video is None:
         return None
 
-    key, upload_id = _require_active_upload(video)
+    upload_session = _get_active_upload_session(db, video)
 
     try:
         storage.complete_multipart_upload(
-            key=key,
-            upload_id=upload_id,
+            key=upload_session.object_key,
+            upload_id=upload_session.object_upload_id,
             parts=[
                 StorageCompletedUploadPart(
                     part_number=part.part_number,
@@ -165,14 +188,19 @@ def complete_video_upload(
                 for part in parts
             ],
         )
-        if not storage.object_exists(key):
+        if not storage.object_exists(upload_session.object_key):
             raise VideoUploadStorageError("completed upload object was not found")
     except ObjectStorageError as exc:
+        upload_session.status = UploadStatus.failed
+        upload_session.error = "storage upload completion failed"
+        db.commit()
         raise VideoUploadStorageError("storage upload completion failed") from exc
 
     video.status = ProcessingStatus.pending
     video.uploaded_at = datetime.now(timezone.utc)
-    _create_renditions_and_jobs(db, video)
+    upload_session.status = UploadStatus.completed
+    upload_session.completed_at = datetime.now(timezone.utc)
+    _create_renditions_and_jobs(db, video, max_attempts=settings.WORKER_JOB_RETRY_COUNT)
     db.commit()
     db.refresh(video)
 
@@ -190,12 +218,12 @@ def refresh_video_upload(
     if video is None:
         return None
 
-    key, upload_id = _require_active_upload(video)
+    upload_session = _get_active_upload_session(db, video)
 
     try:
         upload = storage.refresh_multipart_upload_urls(
-            key=key,
-            upload_id=upload_id,
+            key=upload_session.object_key,
+            upload_id=upload_session.object_upload_id,
             part_count=part_count,
         )
     except ObjectStorageError as exc:
@@ -226,17 +254,22 @@ def abort_video_upload(
     if video is None:
         return None
 
-    key, upload_id = _require_active_upload(video)
+    upload_session = _get_active_upload_session(db, video)
 
     try:
         storage.abort_multipart_upload(
-            key=key,
-            upload_id=upload_id,
+            key=upload_session.object_key,
+            upload_id=upload_session.object_upload_id,
         )
     except ObjectStorageError as exc:
+        upload_session.status = UploadStatus.failed
+        upload_session.error = "storage upload abort failed"
+        db.commit()
         raise VideoUploadStorageError("storage upload abort failed") from exc
 
     video.status = ProcessingStatus.failed
+    upload_session.status = UploadStatus.aborted
+    upload_session.aborted_at = datetime.now(timezone.utc)
     db.commit()
     return True
 

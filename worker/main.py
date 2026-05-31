@@ -21,7 +21,7 @@ def connect_with_retry() -> pika.BlockingConnection:
     parameters = pika.URLParameters(settings.RABBITMQ_URL)
     last_error: Exception | None = None
 
-    for attempt in range(1, 31):
+    for attempt in range(1, settings.RABBITMQ_CONNECT_RETRY_COUNT + 1):
         try:
             return pika.BlockingConnection(parameters)
         except pika.exceptions.AMQPConnectionError as exc:

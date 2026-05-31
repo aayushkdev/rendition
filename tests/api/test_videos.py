@@ -1,5 +1,7 @@
 from core.models.job import Job
 from core.models.rendition import Rendition
+from core.models.enums import UploadStatus
+from core.models.upload_session import UploadSession
 from core.models.video import Video
 
 
@@ -23,6 +25,7 @@ def test_create_video_returns_multipart_upload_session(client, db_session):
     assert [part["part_number"] for part in payload["parts"]] == [1, 2]
 
     assert db_session.query(Video).count() == 1
+    assert db_session.query(UploadSession).count() == 1
     assert db_session.query(Rendition).count() == 0
     assert db_session.query(Job).count() == 0
 
@@ -41,7 +44,7 @@ def test_create_video_rejects_invalid_upload_request(client):
     assert response.status_code == 422
 
 
-def test_get_video_returns_production_response_shape(client):
+def test_get_video_returns_production_response_shape(client, db_session):
     create_response = client.post(
         "/api/v1/videos",
         json={
@@ -58,6 +61,9 @@ def test_get_video_returns_production_response_shape(client):
     )
 
     assert complete_response.status_code == 200
+    upload_session = db_session.query(UploadSession).one()
+    assert upload_session.status == UploadStatus.completed
+    assert upload_session.completed_at is not None
     assert complete_response.json() == {
         "video_id": video_id,
         "status": "pending",
@@ -99,7 +105,7 @@ def test_refresh_upload_returns_new_part_urls(client):
     assert "refreshPartNumber=1" in payload["parts"][0]["upload_url"]
 
 
-def test_abort_upload_marks_video_failed(client):
+def test_abort_upload_marks_video_failed(client, db_session):
     create_response = client.post(
         "/api/v1/videos",
         json={
@@ -114,6 +120,9 @@ def test_abort_upload_marks_video_failed(client):
     response = client.delete(f"/api/v1/videos/{video_id}/upload")
 
     assert response.status_code == 204
+    upload_session = db_session.query(UploadSession).one()
+    assert upload_session.status == UploadStatus.aborted
+    assert upload_session.aborted_at is not None
 
     state_response = client.get(f"/api/v1/videos/{video_id}")
     assert state_response.status_code == 200

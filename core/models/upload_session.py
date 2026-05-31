@@ -3,25 +3,24 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 import uuid
+
 from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from core.db.base import Base
-from core.models.enums import ProcessingStatus
 from sqlalchemy.sql import func
 
+from core.db.base import Base
+from core.models.enums import UploadStatus
+
 if TYPE_CHECKING:
-    from core.models.rendition import Rendition
+    from core.models.video import Video
 
 
-class Job(Base):
-    __tablename__ = "jobs"
+class UploadSession(Base):
+    __tablename__ = "upload_sessions"
     __table_args__ = (
-        Index("ix_jobs_status_created_at", "status", "created_at"),
-        Index("ix_jobs_status_started_at", "status", "started_at"),
-        Index("ix_jobs_video_id", "video_id"),
-        Index("ix_jobs_rendition_id", "rendition_id"),
+        Index("ix_upload_sessions_video_id", "video_id"),
+        Index("ix_upload_sessions_status_created_at", "status", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -36,21 +35,20 @@ class Job(Base):
         nullable=False,
     )
 
-    rendition_id: Mapped[uuid.UUID] = mapped_column(
-        PostgresUUID(as_uuid=True),
-        ForeignKey("renditions.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    bucket: Mapped[str] = mapped_column(String, nullable=False)
+    object_key: Mapped[str] = mapped_column(String, nullable=False)
+    object_upload_id: Mapped[str] = mapped_column(String, nullable=False)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    content_type: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    part_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    status: Mapped[ProcessingStatus] = mapped_column(
-        Enum(ProcessingStatus, name="processing_status"),
+    status: Mapped[UploadStatus] = mapped_column(
+        Enum(UploadStatus, name="upload_status"),
         nullable=False,
-        default=ProcessingStatus.pending,
+        default=UploadStatus.active,
     )
-
     error: Mapped[str | None] = mapped_column(String, nullable=True)
-    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -65,14 +63,14 @@ class Job(Base):
         nullable=False,
     )
 
-    started_at: Mapped[datetime | None] = mapped_column(
+    completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
 
-    finished_at: Mapped[datetime | None] = mapped_column(
+    aborted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
 
-    rendition: Mapped[Rendition] = relationship("Rendition", back_populates="jobs")
+    video: Mapped[Video] = relationship("Video", back_populates="upload_sessions")
