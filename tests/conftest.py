@@ -8,6 +8,53 @@ from api.main import app
 from core.db.base import Base
 from core.db.session import get_db
 from core.models import job, rendition, video  # noqa: F401
+from core.storage import (
+    CompletedUploadPart,
+    MultipartUploadPart,
+    MultipartUploadSession,
+    get_object_storage,
+)
+
+
+class FakeObjectStorage:
+    bucket = "test-bucket"
+
+    def __init__(self):
+        self.completed_uploads = []
+        self.existing_keys = set()
+
+    def create_multipart_upload(
+        self,
+        key: str,
+        content_type: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
+        return MultipartUploadSession(
+            bucket=self.bucket,
+            key=key,
+            upload_id="test-upload-id",
+            parts=[
+                MultipartUploadPart(
+                    part_number=part_number,
+                    upload_url=f"http://storage.test/{key}?partNumber={part_number}",
+                )
+                for part_number in range(1, part_count + 1)
+            ],
+        )
+
+    def complete_multipart_upload(
+        self,
+        key: str,
+        upload_id: str,
+        parts: list[CompletedUploadPart],
+    ) -> None:
+        self.completed_uploads.append(
+            {"key": key, "upload_id": upload_id, "parts": parts}
+        )
+        self.existing_keys.add(key)
+
+    def object_exists(self, key: str) -> bool:
+        return key in self.existing_keys
 
 
 @pytest.fixture()
@@ -34,7 +81,10 @@ def client(db_session):
     def override_get_db():
         yield db_session
 
+    storage = FakeObjectStorage()
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_object_storage] = lambda: storage
     try:
         yield TestClient(app)
     finally:
