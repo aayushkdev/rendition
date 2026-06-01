@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     UPLOAD_MAX_SIZE_BYTES: int = Field(default=5_368_709_120, gt=0)
     UPLOAD_MAX_PART_COUNT: int = Field(default=10_000, ge=1, le=10_000)
+    UPLOAD_PART_SIZE_BYTES: int = Field(default=8_388_608, ge=5_242_880)
     UPLOAD_ALLOWED_CONTENT_TYPES: str = "video/mp4,video/quicktime,video/x-matroska"
 
     WORKER_JOB_RETRY_COUNT: int = Field(default=3, ge=0)

@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 import re
 
@@ -8,6 +9,13 @@ from core.config import settings
 from core.models.enums import ProcessingStatus
 
 PART_ETAG_PATTERN = re.compile(r'^(?:"[A-Fa-f0-9]{32}"|[A-Fa-f0-9]{32})$')
+
+
+class UploadConfigResponse(BaseModel):
+    max_size_bytes: int
+    max_part_count: int
+    part_size_bytes: int
+    allowed_content_types: List[str]
 
 
 class VideoCreateRequest(BaseModel):
@@ -94,3 +102,12 @@ class VideoState(BaseModel):
     video_id: UUID
     status: ProcessingStatus
     renditions: List[RenditionState]
+
+
+class VideoListItem(BaseModel):
+    video_id: UUID
+    title: str
+    uploaded_at: datetime | None
+    created_at: datetime
+    status: ProcessingStatus
+    size_bytes: int | None

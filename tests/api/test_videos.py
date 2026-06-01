@@ -5,6 +5,49 @@ from core.models.upload_session import UploadSession
 from core.models.video import Video
 
 
+def test_get_upload_config_returns_backend_limits(client):
+    response = client.get("/api/v1/videos/upload/config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "max_size_bytes": 5_368_709_120,
+        "max_part_count": 10_000,
+        "part_size_bytes": 8_388_608,
+        "allowed_content_types": [
+            "video/mp4",
+            "video/quicktime",
+            "video/x-matroska",
+        ],
+    }
+
+
+def test_list_videos_returns_persisted_uploads(client):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+
+    response = client.get("/api/v1/videos")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "video_id": video_id,
+            "title": "video.mp4",
+            "uploaded_at": None,
+            "created_at": response.json()[0]["created_at"],
+            "status": "uploading",
+            "size_bytes": 12_345,
+        }
+    ]
+
+
 def test_create_video_returns_multipart_upload_session(client, db_session):
     response = client.post(
         "/api/v1/videos",

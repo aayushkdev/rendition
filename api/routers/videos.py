@@ -3,23 +3,42 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from core.db.session import get_db
 from api.schemas.video import (
+    UploadConfigResponse,
     VideoCreateRequest,
     VideoCreateResponse,
+    VideoListItem,
     VideoState,
     VideoUploadCompleteRequest,
     VideoUploadRefreshRequest,
 )
+from core.config import settings
 from core.services.video_service import (
     VideoNotFoundError,
     abort_video_upload,
     complete_video_upload,
     create_video_upload,
     get_video_state,
+    list_videos,
     refresh_video_upload,
 )
 from core.storage import ObjectStorage, get_object_storage
 
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+
+@router.get("/upload/config", response_model=UploadConfigResponse)
+def get_upload_config():
+    return UploadConfigResponse(
+        max_size_bytes=settings.UPLOAD_MAX_SIZE_BYTES,
+        max_part_count=settings.UPLOAD_MAX_PART_COUNT,
+        part_size_bytes=settings.UPLOAD_PART_SIZE_BYTES,
+        allowed_content_types=sorted(settings.upload_allowed_content_types),
+    )
+
+
+@router.get("", response_model=list[VideoListItem])
+def get_videos(db: Session = Depends(get_db)):
+    return list_videos(db)
 
 
 @router.post(

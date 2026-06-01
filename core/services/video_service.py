@@ -8,6 +8,7 @@ from api.schemas.video import (
     MultipartUploadPart,
     RenditionState,
     VideoCreateResponse,
+    VideoListItem,
     VideoState,
 )
 from core.config import settings
@@ -381,3 +382,19 @@ def get_video_state(db: Session, video_id: UUID) -> VideoState | None:
             for rendition in video.renditions
         ],
     )
+
+
+def list_videos(db: Session) -> list[VideoListItem]:
+    videos = db.query(Video).order_by(Video.created_at.desc()).all()
+
+    return [
+        VideoListItem(
+            video_id=video.id,
+            title=video.source_filename or video.source,
+            uploaded_at=video.uploaded_at,
+            created_at=video.created_at,
+            status=video.status,
+            size_bytes=video.source_size_bytes,
+        )
+        for video in videos
+    ]
