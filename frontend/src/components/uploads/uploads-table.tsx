@@ -1,6 +1,25 @@
-import { FileVideo, Play, RotateCcw, X } from "lucide-react";
+import { Copy, FileVideo, MoreHorizontal, Play, RotateCcw, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/animate-ui/components/buttons/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/animate-ui/components/radix/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/animate-ui/components/radix/dropdown-menu";
 import {
   Tabs,
   TabsContent,
@@ -13,16 +32,22 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/animate-ui/components/radix/tooltip";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import { StatusCell } from "./status-cell";
 import type { UploadedVideo } from "./types";
 
 type UploadsTableProps = {
   videos: UploadedVideo[];
+  isLoading?: boolean;
   onCancelUpload: () => void;
 };
 
-export function UploadsTable({ videos, onCancelUpload }: UploadsTableProps) {
+export function UploadsTable({
+  videos,
+  isLoading = false,
+  onCancelUpload,
+}: UploadsTableProps) {
   return (
     <section className="rounded-lg border border-border bg-card shadow-sm">
       <div className="flex flex-col justify-between gap-4 border-b border-border p-4 md:flex-row md:items-center">
@@ -60,7 +85,33 @@ export function UploadsTable({ videos, onCancelUpload }: UploadsTableProps) {
             </tr>
           </thead>
           <tbody>
-            {videos.map((video) => (
+            {isLoading ? (
+              Array.from({ length: 4 }).map((_, index) => (
+                <tr key={index}>
+                  <td className="border-b border-border px-4 py-4">
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="size-10" />
+                      <Skeleton className="h-4 w-44" />
+                    </div>
+                  </td>
+                  <td className="border-b border-border px-4 py-4">
+                    <Skeleton className="h-4 w-20" />
+                  </td>
+                  <td className="border-b border-border px-4 py-4">
+                    <Skeleton className="h-8 w-44" />
+                  </td>
+                  <td className="border-b border-border px-4 py-4">
+                    <Skeleton className="h-4 w-16" />
+                  </td>
+                  <td className="border-b border-border px-4 py-4">
+                    <div className="flex justify-end">
+                      <Skeleton className="size-8" />
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              videos.map((video) => (
               <tr key={video.id} className="group">
                 <td className="border-b border-border px-4 py-4">
                   <div className="flex items-center gap-3">
@@ -84,35 +135,102 @@ export function UploadsTable({ videos, onCancelUpload }: UploadsTableProps) {
                     <div className="flex justify-end gap-1">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button type="button" variant="ghost" size="icon-sm">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() =>
+                              toast.info("Retry queued", {
+                                description: "The upload part retry will start shortly.",
+                              })
+                            }
+                          >
                             <RotateCcw className="size-4" />
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>Retry upload</TooltipContent>
                       </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={onCancelUpload}
-                          >
-                            <X className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Cancel upload</TooltipContent>
-                      </Tooltip>
+                      <AlertDialog>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <AlertDialogTrigger asChild>
+                              <Button type="button" variant="ghost" size="icon-sm">
+                                <X className="size-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent>Cancel upload</TooltipContent>
+                        </Tooltip>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Cancel this upload?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              The temporary upload row will be removed from the table.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Keep uploading</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => {
+                                onCancelUpload();
+                                toast.warning("Upload cancelled", {
+                                  description: video.title,
+                                });
+                              }}
+                            >
+                              Cancel upload
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </div>
                   ) : (
-                    <Button type="button" variant="ghost" size="sm">
-                      <Play className="size-4" />
-                      Open
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button type="button" variant="ghost" size="icon-sm">
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            toast.info("Opening video", {
+                              description: video.title,
+                            })
+                          }
+                        >
+                          <Play className="size-4" />
+                          Open
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            toast.success("Link copied", {
+                              description: video.title,
+                            })
+                          }
+                        >
+                          <Copy className="size-4" />
+                          Copy link
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() =>
+                            toast.error("Delete is not wired yet", {
+                              description: video.title,
+                            })
+                          }
+                        >
+                          <Trash2 className="size-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
                 </td>
               </tr>
-            ))}
+              ))
+            )}
           </tbody>
         </table>
       </div>

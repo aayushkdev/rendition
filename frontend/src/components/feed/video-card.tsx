@@ -5,20 +5,25 @@ import { VideoSurface } from "./video-surface";
 
 type VideoCardProps = {
   video: FeedVideo;
+  onSelect: (video: FeedVideo) => void;
 };
 
-export function VideoCard({ video }: VideoCardProps) {
+export function VideoCard({ video, onSelect }: VideoCardProps) {
   return (
     <article className="group">
-      <VideoSurface video={video} />
+      <VideoSurface video={video} onClick={() => onSelect(video)} />
       <div className="mt-3 flex items-start gap-3">
         <div className="mt-1 grid size-9 shrink-0 place-items-center rounded-md bg-secondary text-secondary-foreground">
           <Film className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="line-clamp-2 text-sm font-semibold leading-5">
+          <button
+            type="button"
+            onClick={() => onSelect(video)}
+            className="line-clamp-2 text-left text-sm font-semibold leading-5 outline-none hover:text-primary focus-visible:text-primary"
+          >
             {video.title}
-          </h2>
+          </button>
           <p className="mt-1 truncate text-sm text-muted-foreground">
             {video.owner} / {video.uploadedAt}
           </p>

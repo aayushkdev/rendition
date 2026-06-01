@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { Activity, ArrowLeft } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/animate-ui/components/buttons/button";
 import {
@@ -41,6 +42,9 @@ export function UploadDashboard() {
   function handleFile(file: File | undefined) {
     if (!file) return;
     setSelectedFile(file);
+    toast.success("Upload started", {
+      description: file.name,
+    });
   }
 
   return (

@@ -10,8 +10,10 @@ const eslintConfig = defineConfig([
       "src/components/animate-ui/**/*.{ts,tsx}",
       "src/hooks/use-auto-height.tsx",
       "src/hooks/use-controlled-state.tsx",
+      "src/hooks/use-data-state.tsx",
     ],
     rules: {
+      "react-hooks/immutability": "off",
       "react-hooks/set-state-in-effect": "off",
       "react-hooks/static-components": "off",
     },

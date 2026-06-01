@@ -1,7 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { Clock3, Play, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  Clock3,
+  Maximize,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+  Volume2,
+} from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/animate-ui/components/buttons/button";
 import {
@@ -11,11 +23,29 @@ import {
 } from "@/components/animate-ui/components/radix/tooltip";
 import { feedVideos } from "./data";
 import { UpNextList } from "./up-next-list";
+import type { FeedVideo } from "./types";
 import { VideoCard } from "./video-card";
+import { VideoGridSkeleton } from "./video-feed-skeleton";
 import { VideoSurface } from "./video-surface";
 
 export function VideoFeed() {
-  const featured = feedVideos[0];
+  const [selectedVideo, setSelectedVideo] = useState<FeedVideo | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const sideVideos = useMemo(
+    () =>
+      selectedVideo
+        ? feedVideos.filter((video) => video.id !== selectedVideo.id)
+        : feedVideos.slice(1),
+    [selectedVideo],
+  );
+
+  function refreshFeed() {
+    setIsLoading(true);
+    window.setTimeout(() => {
+      setIsLoading(false);
+      toast.info("Feed refreshed");
+    }, 700);
+  }
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -45,6 +75,20 @@ export function VideoFeed() {
               </TooltipTrigger>
               <TooltipContent>Filters</TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={refreshFeed}
+                  disabled={isLoading}
+                >
+                  <RefreshCw className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh feed</TooltipContent>
+            </Tooltip>
             <Button type="button" asChild>
               <Link href="/dashboard">
                 <Plus className="size-4" />
@@ -54,33 +98,79 @@ export function VideoFeed() {
           </div>
         </header>
 
-        <section className="grid gap-5 lg:grid-cols-[1.55fr_0.85fr]">
-          <div>
-            <VideoSurface video={featured} className="rounded-lg" />
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h1 className="text-2xl font-semibold tracking-normal md:text-3xl">
-                  {featured.title}
-                </h1>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {featured.owner} / {featured.uploadedAt} / {featured.views} views
-                </p>
-              </div>
-              <Button type="button" variant="outline">
-                <Clock3 className="size-4" />
-                Watch later
+        {selectedVideo ? (
+          <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+            <div className="min-w-0">
+              <Button
+                type="button"
+                variant="ghost"
+                className="mb-3"
+                onClick={() => setSelectedVideo(null)}
+              >
+                <ArrowLeft className="size-4" />
+                All videos
               </Button>
+              <VideoSurface video={selectedVideo} className="rounded-lg" player />
+              <div className="mt-3 flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="outline" size="icon">
+                      <Play className="size-4 fill-current" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Play</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="outline" size="icon">
+                      <Volume2 className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Volume</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="outline" size="icon">
+                      <Maximize className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Fullscreen</TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <h1 className="text-2xl font-semibold tracking-normal md:text-3xl">
+                    {selectedVideo.title}
+                  </h1>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {selectedVideo.owner} / {selectedVideo.uploadedAt} /{" "}
+                    {selectedVideo.views} views
+                  </p>
+                </div>
+                <Button type="button" variant="outline">
+                  <Clock3 className="size-4" />
+                  Watch later
+                </Button>
+              </div>
             </div>
-          </div>
 
-          <UpNextList videos={feedVideos.slice(1, 4)} />
-        </section>
-
-        <section className="grid gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {feedVideos.map((video) => (
-            <VideoCard key={video.id} video={video} />
-          ))}
-        </section>
+            <UpNextList videos={sideVideos} onSelect={setSelectedVideo} />
+          </section>
+        ) : (
+          isLoading ? (
+            <VideoGridSkeleton />
+          ) : (
+            <section className="grid gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {feedVideos.map((video) => (
+                <VideoCard
+                  key={video.id}
+                  video={video}
+                  onSelect={setSelectedVideo}
+                />
+              ))}
+            </section>
+          )
+        )}
       </div>
     </main>
   );
