@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from api.main import app
 from core.db.base import Base
 from core.db.session import get_db
-from core.models import job, rendition, upload_session, video  # noqa: F401
+from core.models import job, outbox, rendition, upload_session, video  # noqa: F401
 from core.storage import (
     CompletedUploadPart,
     MultipartUploadPart,

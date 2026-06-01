@@ -13,6 +13,7 @@ from sqlalchemy.sql import func
 
 if TYPE_CHECKING:
     from core.models.rendition import Rendition
+    from core.models.outbox import OutboxMessage
 
 
 class Job(Base):
@@ -76,3 +77,8 @@ class Job(Base):
     )
 
     rendition: Mapped[Rendition] = relationship("Rendition", back_populates="jobs")
+    outbox_message: Mapped[OutboxMessage | None] = relationship(
+        "OutboxMessage",
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )
