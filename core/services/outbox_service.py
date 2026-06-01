@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -14,15 +15,24 @@ def publish_pending_outbox_messages(
     db: Session,
     publisher: JobQueuePublisher,
     limit: int = 100,
+    outbox_message_ids: list[UUID] | None = None,
 ) -> int:
-    outbox_messages = (
+    if outbox_message_ids == []:
+        return 0
+
+    query = (
         db.query(OutboxMessage)
         .filter(OutboxMessage.status == OUTBOX_STATUS_PENDING)
         .order_by(OutboxMessage.created_at)
-        .limit(limit)
         .with_for_update(skip_locked=True, of=OutboxMessage)
-        .all()
     )
+
+    if outbox_message_ids is not None:
+        query = query.filter(OutboxMessage.id.in_(outbox_message_ids))
+    else:
+        query = query.limit(limit)
+
+    outbox_messages = query.all()
 
     if not outbox_messages:
         return 0

@@ -14,6 +14,8 @@ class Settings(BaseSettings):
 
     RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/%2F"
     RABBITMQ_CONNECT_RETRY_COUNT: int = Field(default=30, ge=1)
+    OUTBOX_PUBLISH_BATCH_SIZE: int = Field(default=100, ge=1)
+    OUTBOX_PUBLISH_INTERVAL_SECONDS: float = Field(default=30.0, gt=0)
 
     STORAGE_ENDPOINT: str = "http://localhost:9000"
     STORAGE_PRESIGN_ENDPOINT: str | None = None

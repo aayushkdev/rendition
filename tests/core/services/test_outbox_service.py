@@ -89,6 +89,39 @@ def test_publish_pending_outbox_messages_keeps_failed_rows_pending(db_session):
     assert outbox_message.last_error == "rabbitmq unavailable"
 
 
+def test_publish_pending_outbox_messages_can_publish_specific_rows(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    jobs = [rendition.jobs[0] for rendition in video.renditions[:2]]
+    outbox_messages = [
+        OutboxMessage(
+            job_id=job.id,
+            video_id=job.video_id,
+            rendition_id=job.rendition_id,
+            exchange=ENCODING_EXCHANGE,
+            routing_key=ENCODING_ROUTING_KEY,
+            status="pending",
+        )
+        for job in jobs
+    ]
+    db_session.add_all(outbox_messages)
+    db_session.commit()
+
+    publisher = RecordingPublisher()
+    published_count = publish_pending_outbox_messages(
+        db_session,
+        publisher,
+        outbox_message_ids=[outbox_messages[0].id],
+    )
+
+    for outbox_message in outbox_messages:
+        db_session.refresh(outbox_message)
+    assert published_count == 1
+    assert outbox_messages[0].status == "published"
+    assert outbox_messages[1].status == "pending"
+    assert len(publisher.messages) == 1
+    assert publisher.messages[0][0].job_id == jobs[0].id
+
+
 def test_publish_pending_outbox_messages_records_session_failures(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]

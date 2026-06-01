@@ -79,13 +79,17 @@ def complete_upload(
     storage: ObjectStorage = Depends(get_object_storage),
     publisher: JobQueuePublisher = Depends(get_job_queue_publisher),
 ):
-    state = complete_video_upload(db, storage, video_id, payload.parts)
+    result = complete_video_upload(db, storage, video_id, payload.parts)
 
-    if state is None:
+    if result is None:
         raise VideoNotFoundError("Video not found")
 
-    publish_pending_outbox_messages(db, publisher)
-    return state
+    publish_pending_outbox_messages(
+        db=db,
+        publisher=publisher,
+        outbox_message_ids=result.outbox_message_ids,
+    )
+    return result.state
 
 
 @router.post("/{video_id}/upload/refresh", response_model=VideoCreateResponse)

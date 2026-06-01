@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -54,6 +55,12 @@ DEFAULT_RENDITIONS = [
 ]
 
 
+@dataclass(frozen=True)
+class VideoUploadCompletion:
+    state: VideoState
+    outbox_message_ids: list[UUID]
+
+
 def _create_renditions_and_jobs(
     db: Session,
     video: Video,
@@ -86,9 +93,10 @@ def _create_renditions_and_jobs(
     return jobs
 
 
-def _create_outbox_messages(db: Session, jobs: list[Job]) -> None:
+def _create_outbox_messages(db: Session, jobs: list[Job]) -> list[UUID]:
+    outbox_messages: list[OutboxMessage] = []
     for job in jobs:
-        db.add(
+        outbox_messages.append(
             OutboxMessage(
                 job_id=job.id,
                 video_id=job.video_id,
@@ -96,8 +104,12 @@ def _create_outbox_messages(db: Session, jobs: list[Job]) -> None:
                 exchange=ENCODING_EXCHANGE,
                 routing_key=ENCODING_ROUTING_KEY,
                 status="pending",
-            )
+            ),
         )
+
+    db.add_all(outbox_messages)
+    db.flush()
+    return [message.id for message in outbox_messages]
 
 
 def _get_active_upload_session(db: Session, video: Video) -> UploadSession:
@@ -261,7 +273,7 @@ def complete_video_upload(
     storage: ObjectStorage,
     video_id: UUID,
     parts: list[CompletedUploadPartSchema],
-) -> VideoState | None:
+) -> VideoUploadCompletion | None:
     video = _get_video_for_upload_completion(db, video_id)
 
     if video is None:
@@ -313,11 +325,18 @@ def complete_video_upload(
         video,
         max_attempts=settings.WORKER_JOB_RETRY_COUNT,
     )
-    _create_outbox_messages(db, jobs)
+    outbox_message_ids = _create_outbox_messages(db, jobs)
     db.commit()
     db.refresh(video)
 
-    return get_video_state(db, video.id)
+    state = get_video_state(db, video.id)
+    if state is None:
+        raise VideoNotFoundError("Video not found")
+
+    return VideoUploadCompletion(
+        state=state,
+        outbox_message_ids=outbox_message_ids,
+    )
 
 
 def refresh_video_upload(
