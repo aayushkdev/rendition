@@ -144,6 +144,18 @@ def test_get_video_returns_production_response_shape(client, db_session):
     } == {
         (job.id, job.video_id, job.rendition_id) for job in db_session.query(Job).all()
     }
+    assert {message.status for message in outbox_messages} == {"published"}
+    assert len(client.publisher.published_messages) == 3
+    assert {
+        (
+            published["message"].job_id,
+            published["message"].video_id,
+            published["message"].rendition_id,
+        )
+        for published in client.publisher.published_messages
+    } == {
+        (job.id, job.video_id, job.rendition_id) for job in db_session.query(Job).all()
+    }
     assert complete_response.json() == {
         "video_id": video_id,
         "status": "pending",

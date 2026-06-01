@@ -12,6 +12,8 @@ from api.schemas.video import (
     VideoUploadRefreshRequest,
 )
 from core.config import settings
+from core.queue import JobQueuePublisher, get_job_queue_publisher
+from core.services.outbox_service import publish_pending_outbox_messages
 from core.services.video_service import (
     VideoNotFoundError,
     abort_video_upload,
@@ -75,12 +77,14 @@ def complete_upload(
     payload: VideoUploadCompleteRequest,
     db: Session = Depends(get_db),
     storage: ObjectStorage = Depends(get_object_storage),
+    publisher: JobQueuePublisher = Depends(get_job_queue_publisher),
 ):
     state = complete_video_upload(db, storage, video_id, payload.parts)
 
     if state is None:
         raise VideoNotFoundError("Video not found")
 
+    publish_pending_outbox_messages(db, publisher)
     return state
 
 

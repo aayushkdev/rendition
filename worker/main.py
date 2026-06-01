@@ -5,16 +5,13 @@ import time
 import pika
 
 from core.config import settings
+from core.queue.publisher import setup_encoding_topology
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger("rendition.worker")
-
-EXCHANGE = "rendition"
-QUEUE = "jobs.encode"
-ROUTING_KEY = "job.encode"
 
 
 def connect_with_retry() -> pika.BlockingConnection:
@@ -36,12 +33,6 @@ def connect_with_retry() -> pika.BlockingConnection:
     raise RuntimeError("failed to connect to RabbitMQ") from last_error
 
 
-def setup_topology(channel: pika.adapters.blocking_connection.BlockingChannel) -> None:
-    channel.exchange_declare(exchange=EXCHANGE, exchange_type="direct", durable=True)
-    channel.queue_declare(queue=QUEUE, durable=True)
-    channel.queue_bind(queue=QUEUE, exchange=EXCHANGE, routing_key=ROUTING_KEY)
-
-
 def main() -> None:
     stopping = False
 
@@ -54,7 +45,7 @@ def main() -> None:
 
     connection = connect_with_retry()
     channel = connection.channel()
-    setup_topology(channel)
+    setup_encoding_topology(channel)
 
     logger.info("worker ready; encoding processor not enabled yet")
     try:

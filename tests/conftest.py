@@ -8,6 +8,7 @@ from api.main import app
 from core.db.base import Base
 from core.db.session import get_db
 from core.models import job, outbox, rendition, upload_session, video  # noqa: F401
+from core.queue import get_job_queue_publisher
 from core.storage import (
     CompletedUploadPart,
     MultipartUploadPart,
@@ -100,6 +101,20 @@ class FakeObjectStorage:
         self.metadata_by_key.pop(key, None)
 
 
+class FakeJobQueuePublisher:
+    def __init__(self):
+        self.published_messages = []
+
+    def publish_encoding_job(self, message, exchange: str, routing_key: str) -> None:
+        self.published_messages.append(
+            {
+                "message": message,
+                "exchange": exchange,
+                "routing_key": routing_key,
+            }
+        )
+
+
 @pytest.fixture()
 def db_session():
     engine = create_engine(
@@ -125,12 +140,15 @@ def client(db_session):
         yield db_session
 
     storage = FakeObjectStorage()
+    publisher = FakeJobQueuePublisher()
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_object_storage] = lambda: storage
+    app.dependency_overrides[get_job_queue_publisher] = lambda: publisher
     try:
         with TestClient(app) as test_client:
             test_client.storage = storage
+            test_client.publisher = publisher
             yield test_client
     finally:
         app.dependency_overrides.clear()
