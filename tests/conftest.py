@@ -104,6 +104,17 @@ class FakeObjectStorage:
 class FakeJobQueuePublisher:
     def __init__(self):
         self.published_messages = []
+        self.session_count = 0
+
+    def session(self):
+        self.session_count += 1
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback):
+        return False
 
     def publish_encoding_job(self, message, exchange: str, routing_key: str) -> None:
         self.published_messages.append(

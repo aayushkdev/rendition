@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import Protocol
 
 import pika
@@ -15,6 +17,8 @@ class QueuePublishError(RuntimeError):
 
 
 class JobQueuePublisher(Protocol):
+    def session(self) -> AbstractContextManager["JobQueuePublisher"]: ...
+
     def publish_encoding_job(
         self,
         message: EncodingJobMessage,
@@ -27,32 +31,54 @@ class RabbitMQJobQueuePublisher:
     def __init__(self, rabbitmq_url: str) -> None:
         self._rabbitmq_url = rabbitmq_url
 
+    @contextmanager
+    def session(self) -> Iterator["RabbitMQJobQueueSession"]:
+        connection: pika.BlockingConnection | None = None
+        try:
+            connection = pika.BlockingConnection(pika.URLParameters(self._rabbitmq_url))
+            channel = connection.channel()
+            setup_encoding_topology(channel)
+            yield RabbitMQJobQueueSession(channel)
+        except Exception as exc:
+            raise QueuePublishError("failed to publish encoding job") from exc
+        finally:
+            if connection is not None and connection.is_open:
+                connection.close()
+
     def publish_encoding_job(
         self,
         message: EncodingJobMessage,
         exchange: str,
         routing_key: str,
     ) -> None:
-        connection: pika.BlockingConnection | None = None
-        try:
-            connection = pika.BlockingConnection(pika.URLParameters(self._rabbitmq_url))
-            channel = connection.channel()
-            setup_encoding_topology(channel)
-            channel.basic_publish(
-                exchange=exchange,
-                routing_key=routing_key,
-                body=message.model_dump_json().encode("utf-8"),
-                properties=pika.BasicProperties(
-                    content_type="application/json",
-                    delivery_mode=2,
-                ),
-                mandatory=True,
-            )
-        except Exception as exc:
-            raise QueuePublishError("failed to publish encoding job") from exc
-        finally:
-            if connection is not None and connection.is_open:
-                connection.close()
+        with self.session() as session:
+            session.publish_encoding_job(message, exchange, routing_key)
+
+
+class RabbitMQJobQueueSession:
+    def __init__(self, channel: pika.adapters.blocking_connection.BlockingChannel):
+        self._channel = channel
+
+    @contextmanager
+    def session(self) -> Iterator["RabbitMQJobQueueSession"]:
+        yield self
+
+    def publish_encoding_job(
+        self,
+        message: EncodingJobMessage,
+        exchange: str,
+        routing_key: str,
+    ) -> None:
+        self._channel.basic_publish(
+            exchange=exchange,
+            routing_key=routing_key,
+            body=message.model_dump_json().encode("utf-8"),
+            properties=pika.BasicProperties(
+                content_type="application/json",
+                delivery_mode=2,
+            ),
+            mandatory=True,
+        )
 
 
 def setup_encoding_topology(
