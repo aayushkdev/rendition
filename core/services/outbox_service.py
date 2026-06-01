@@ -3,12 +3,34 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from core.models.enums import OutboxStatus
+from core.models.job import Job
 from core.models.outbox import OutboxMessage
-from core.queue.messages import EncodingJobMessage
+from core.queue.messages import (
+    ENCODING_EXCHANGE,
+    ENCODING_ROUTING_KEY,
+    EncodingJobMessage,
+)
 from core.queue.publisher import JobQueuePublisher
 
-OUTBOX_STATUS_PENDING = "pending"
-OUTBOX_STATUS_PUBLISHED = "published"
+
+def create_outbox_messages(db: Session, jobs: list[Job]) -> list[UUID]:
+    outbox_messages: list[OutboxMessage] = []
+    for job in jobs:
+        outbox_messages.append(
+            OutboxMessage(
+                job_id=job.id,
+                video_id=job.video_id,
+                rendition_id=job.rendition_id,
+                exchange=ENCODING_EXCHANGE,
+                routing_key=ENCODING_ROUTING_KEY,
+                status=OutboxStatus.pending,
+            ),
+        )
+
+    db.add_all(outbox_messages)
+    db.flush()
+    return [message.id for message in outbox_messages]
 
 
 def publish_pending_outbox_messages(
@@ -22,7 +44,7 @@ def publish_pending_outbox_messages(
 
     query = (
         db.query(OutboxMessage)
-        .filter(OutboxMessage.status == OUTBOX_STATUS_PENDING)
+        .filter(OutboxMessage.status == OutboxStatus.pending)
         .order_by(OutboxMessage.created_at)
         .with_for_update(skip_locked=True, of=OutboxMessage)
     )
@@ -56,7 +78,7 @@ def publish_pending_outbox_messages(
                     outbox_message.last_error = str(exc)
                     continue
 
-                outbox_message.status = OUTBOX_STATUS_PUBLISHED
+                outbox_message.status = OutboxStatus.published
                 outbox_message.published_at = datetime.now(timezone.utc)
                 outbox_message.last_error = None
                 published_count += 1

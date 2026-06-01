@@ -4,12 +4,21 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from core.db.base import Base
+from core.models.enums import OutboxStatus
 
 if TYPE_CHECKING:
     from core.models.job import Job
@@ -43,7 +52,11 @@ class OutboxMessage(Base):
     )
     exchange: Mapped[str] = mapped_column(String, nullable=False)
     routing_key: Mapped[str] = mapped_column(String, nullable=False)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    status: Mapped[OutboxStatus] = mapped_column(
+        Enum(OutboxStatus, name="outbox_status"),
+        nullable=False,
+        default=OutboxStatus.pending,
+    )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
 

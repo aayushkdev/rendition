@@ -1,4 +1,5 @@
 from core.models.outbox import OutboxMessage
+from core.models.enums import OutboxStatus
 from core.queue.messages import ENCODING_EXCHANGE, ENCODING_ROUTING_KEY
 from core.services.outbox_service import publish_pending_outbox_messages
 from core.services.video_service import ingest_video
@@ -39,7 +40,7 @@ def test_publish_pending_outbox_messages_marks_rows_published(db_session):
             rendition_id=job.rendition_id,
             exchange=ENCODING_EXCHANGE,
             routing_key=ENCODING_ROUTING_KEY,
-            status="pending",
+            status=OutboxStatus.pending,
         )
         for job in jobs
     ]
@@ -51,7 +52,7 @@ def test_publish_pending_outbox_messages_marks_rows_published(db_session):
 
     for outbox_message in outbox_messages:
         db_session.refresh(outbox_message)
-        assert outbox_message.status == "published"
+        assert outbox_message.status == OutboxStatus.published
         assert outbox_message.published_at is not None
         assert outbox_message.last_error is None
     assert published_count == 2
@@ -71,7 +72,7 @@ def test_publish_pending_outbox_messages_keeps_failed_rows_pending(db_session):
         rendition_id=job.rendition_id,
         exchange=ENCODING_EXCHANGE,
         routing_key=ENCODING_ROUTING_KEY,
-        status="pending",
+        status=OutboxStatus.pending,
     )
     db_session.add(outbox_message)
     db_session.commit()
@@ -83,7 +84,7 @@ def test_publish_pending_outbox_messages_keeps_failed_rows_pending(db_session):
 
     db_session.refresh(outbox_message)
     assert published_count == 0
-    assert outbox_message.status == "pending"
+    assert outbox_message.status == OutboxStatus.pending
     assert outbox_message.published_at is None
     assert outbox_message.attempt_count == 1
     assert outbox_message.last_error == "rabbitmq unavailable"
@@ -99,7 +100,7 @@ def test_publish_pending_outbox_messages_can_publish_specific_rows(db_session):
             rendition_id=job.rendition_id,
             exchange=ENCODING_EXCHANGE,
             routing_key=ENCODING_ROUTING_KEY,
-            status="pending",
+            status=OutboxStatus.pending,
         )
         for job in jobs
     ]
@@ -116,8 +117,8 @@ def test_publish_pending_outbox_messages_can_publish_specific_rows(db_session):
     for outbox_message in outbox_messages:
         db_session.refresh(outbox_message)
     assert published_count == 1
-    assert outbox_messages[0].status == "published"
-    assert outbox_messages[1].status == "pending"
+    assert outbox_messages[0].status == OutboxStatus.published
+    assert outbox_messages[1].status == OutboxStatus.pending
     assert len(publisher.messages) == 1
     assert publisher.messages[0][0].job_id == jobs[0].id
 
@@ -131,7 +132,7 @@ def test_publish_pending_outbox_messages_records_session_failures(db_session):
         rendition_id=job.rendition_id,
         exchange=ENCODING_EXCHANGE,
         routing_key=ENCODING_ROUTING_KEY,
-        status="pending",
+        status=OutboxStatus.pending,
     )
     db_session.add(outbox_message)
     db_session.commit()
@@ -142,7 +143,7 @@ def test_publish_pending_outbox_messages_records_session_failures(db_session):
     db_session.refresh(outbox_message)
     assert published_count == 0
     assert publisher.session_count == 1
-    assert outbox_message.status == "pending"
+    assert outbox_message.status == OutboxStatus.pending
     assert outbox_message.attempt_count == 1
     assert outbox_message.last_error == "rabbitmq connection failed"
 

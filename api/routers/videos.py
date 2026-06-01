@@ -14,15 +14,13 @@ from api.schemas.video import (
 from core.config import settings
 from core.queue import JobQueuePublisher, get_job_queue_publisher
 from core.services.outbox_service import publish_pending_outbox_messages
-from core.services.video_service import (
-    VideoNotFoundError,
+from core.services.upload_service import (
     abort_video_upload,
     complete_video_upload,
     create_video_upload,
-    get_video_state,
-    list_videos,
     refresh_video_upload,
 )
+from core.services.video_service import VideoNotFoundError, get_video_state, list_videos
 from core.storage import ObjectStorage, get_object_storage
 
 router = APIRouter(prefix="/videos", tags=["videos"])

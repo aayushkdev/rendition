@@ -5,12 +5,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.middleware.request_id import REQUEST_ID_HEADER
 from api.schemas.error import ErrorBody, ErrorResponse
-from core.services.video_service import (
-    VideoNotFoundError,
+from core.services.upload_service import (
     VideoUploadConflictError,
     VideoUploadStorageError,
     VideoUploadValidationError,
 )
+from core.services.video_service import VideoNotFoundError
 
 
 def _request_id(request: Request) -> str:

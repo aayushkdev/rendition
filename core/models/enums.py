@@ -15,3 +15,8 @@ class UploadStatus(str, enum.Enum):
     completed = "completed"
     aborted = "aborted"
     failed = "failed"
+
+
+class OutboxStatus(str, enum.Enum):
+    pending = "pending"
+    published = "published"
