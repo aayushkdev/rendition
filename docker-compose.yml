@@ -1,4 +1,20 @@
 services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        API_PROXY_URL: ${API_PROXY_URL:-http://api:8000/api/:path*}
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_PROXY_URL: ${API_PROXY_URL:-http://api:8000/api/:path*}
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
   api:
     build:
       context: .
