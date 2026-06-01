@@ -16,7 +16,9 @@ from core.models.video import Video
 from core.models.rendition import Rendition
 from core.models.job import Job
 from core.models.enums import ProcessingStatus, UploadStatus
+from core.models.outbox import OutboxMessage
 from core.models.upload_session import UploadSession
+from core.queue.messages import ENCODING_EXCHANGE, ENCODING_ROUTING_KEY
 from core.storage import (
     CompletedUploadPart as StorageCompletedUploadPart,
     ObjectStorage,
@@ -52,10 +54,15 @@ DEFAULT_RENDITIONS = [
 ]
 
 
-def _create_renditions_and_jobs(db: Session, video: Video, max_attempts: int) -> None:
+def _create_renditions_and_jobs(
+    db: Session,
+    video: Video,
+    max_attempts: int,
+) -> list[Job]:
     if video.renditions:
-        return
+        return []
 
+    jobs: list[Job] = []
     for rendition_config in DEFAULT_RENDITIONS:
         rendition = Rendition(
             video_id=video.id,
@@ -73,6 +80,24 @@ def _create_renditions_and_jobs(db: Session, video: Video, max_attempts: int) ->
             max_attempts=max_attempts,
         )
         db.add(job)
+        db.flush()
+        jobs.append(job)
+
+    return jobs
+
+
+def _create_outbox_messages(db: Session, jobs: list[Job]) -> None:
+    for job in jobs:
+        db.add(
+            OutboxMessage(
+                job_id=job.id,
+                video_id=job.video_id,
+                rendition_id=job.rendition_id,
+                exchange=ENCODING_EXCHANGE,
+                routing_key=ENCODING_ROUTING_KEY,
+                status="pending",
+            )
+        )
 
 
 def _get_active_upload_session(db: Session, video: Video) -> UploadSession:
@@ -283,7 +308,12 @@ def complete_video_upload(
     video.uploaded_at = datetime.now(timezone.utc)
     upload_session.status = UploadStatus.completed
     upload_session.completed_at = datetime.now(timezone.utc)
-    _create_renditions_and_jobs(db, video, max_attempts=settings.WORKER_JOB_RETRY_COUNT)
+    jobs = _create_renditions_and_jobs(
+        db,
+        video,
+        max_attempts=settings.WORKER_JOB_RETRY_COUNT,
+    )
+    _create_outbox_messages(db, jobs)
     db.commit()
     db.refresh(video)
 

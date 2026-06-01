@@ -1,4 +1,5 @@
 from core.models.job import Job
+from core.models.outbox import OutboxMessage
 from core.models.rendition import Rendition
 from core.models.enums import UploadStatus
 from core.models.upload_session import UploadSession
@@ -71,6 +72,7 @@ def test_create_video_returns_multipart_upload_session(client, db_session):
     assert db_session.query(UploadSession).count() == 1
     assert db_session.query(Rendition).count() == 0
     assert db_session.query(Job).count() == 0
+    assert db_session.query(OutboxMessage).count() == 0
 
 
 def test_create_video_rejects_invalid_upload_request(client):
@@ -133,6 +135,15 @@ def test_get_video_returns_production_response_shape(client, db_session):
     upload_session = db_session.query(UploadSession).one()
     assert upload_session.status == UploadStatus.completed
     assert upload_session.completed_at is not None
+    assert db_session.query(Job).count() == 3
+    outbox_messages = db_session.query(OutboxMessage).order_by(OutboxMessage.created_at)
+    assert outbox_messages.count() == 3
+    assert {
+        (message.job_id, message.video_id, message.rendition_id)
+        for message in outbox_messages
+    } == {
+        (job.id, job.video_id, job.rendition_id) for job in db_session.query(Job).all()
+    }
     assert complete_response.json() == {
         "video_id": video_id,
         "status": "pending",
