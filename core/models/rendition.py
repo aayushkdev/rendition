@@ -3,7 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 import uuid
-from sqlalchemy import DateTime, Integer, Enum, ForeignKey, Index, String
+from sqlalchemy import (
+    DateTime,
+    Integer,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,6 +27,11 @@ if TYPE_CHECKING:
 class Rendition(Base):
     __tablename__ = "renditions"
     __table_args__ = (
+        UniqueConstraint(
+            "video_id",
+            "resolution",
+            name="uq_renditions_video_id_resolution",
+        ),
         Index("ix_renditions_video_id", "video_id"),
         Index("ix_renditions_status", "status"),
     )
