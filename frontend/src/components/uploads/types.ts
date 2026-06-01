@@ -8,9 +8,12 @@ export type VideoStatus =
 
 export type UploadedVideo = {
   id: string;
+  videoId?: string;
   title: string;
   uploadedAt: string;
   status: VideoStatus;
   size: string;
   progress: number;
+  canRetry?: boolean;
+  canCancel?: boolean;
 };

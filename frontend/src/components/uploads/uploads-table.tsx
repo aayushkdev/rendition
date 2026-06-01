@@ -40,13 +40,15 @@ import type { UploadedVideo } from "./types";
 type UploadsTableProps = {
   videos: UploadedVideo[];
   isLoading?: boolean;
-  onCancelUpload: () => void;
+  onCancelUpload: (videoId: string) => void;
+  onRetryUpload: (videoId: string) => void;
 };
 
 export function UploadsTable({
   videos,
   isLoading = false,
   onCancelUpload,
+  onRetryUpload,
 }: UploadsTableProps) {
   return (
     <section className="rounded-lg border border-border bg-card shadow-sm">
@@ -131,58 +133,54 @@ export function UploadsTable({
                   {video.size}
                 </td>
                 <td className="border-b border-border px-4 py-4 text-right">
-                  {video.id === "current-upload" ? (
+                  {video.canCancel || video.canRetry ? (
                     <div className="flex justify-end gap-1">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() =>
-                              toast.info("Retry queued", {
-                                description: "The upload part retry will start shortly.",
-                              })
-                            }
-                          >
-                            <RotateCcw className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Retry upload</TooltipContent>
-                      </Tooltip>
-                      <AlertDialog>
+                      {video.canRetry ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <AlertDialogTrigger asChild>
-                              <Button type="button" variant="ghost" size="icon-sm">
-                                <X className="size-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent>Cancel upload</TooltipContent>
-                        </Tooltip>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Cancel this upload?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              The temporary upload row will be removed from the table.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Keep uploading</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => {
-                                onCancelUpload();
-                                toast.warning("Upload cancelled", {
-                                  description: video.title,
-                                });
-                              }}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => onRetryUpload(video.id)}
                             >
-                              Cancel upload
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                              <RotateCcw className="size-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Retry upload</TooltipContent>
+                        </Tooltip>
+                      ) : null}
+                      {video.canCancel ? (
+                        <AlertDialog>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <AlertDialogTrigger asChild>
+                                <Button type="button" variant="ghost" size="icon-sm">
+                                  <X className="size-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>Cancel upload</TooltipContent>
+                          </Tooltip>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Cancel this upload?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                The multipart upload will be aborted and removed from the
+                                table.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Keep uploading</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => onCancelUpload(video.id)}
+                              >
+                                Cancel upload
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      ) : null}
                     </div>
                   ) : (
                     <DropdownMenu>

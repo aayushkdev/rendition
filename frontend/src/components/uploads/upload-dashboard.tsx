@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Activity, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
@@ -12,38 +12,198 @@ import {
   TooltipTrigger,
 } from "@/components/animate-ui/components/radix/tooltip";
 
-import { uploadedVideos } from "./data";
+import {
+  getUploadConfig,
+  listVideos,
+  type UploadConfigResponse,
+  type VideoListItem,
+} from "./api";
+import {
+  createMultipartUploadController,
+  normalizeContentType,
+  type MultipartUploadController,
+  type MultipartUploadSnapshot,
+} from "./multipart-upload";
 import { StatusBadge } from "./status-badge";
 import type { UploadedVideo } from "./types";
 import { UploadDropzone } from "./upload-dropzone";
 import { UploadsTable } from "./uploads-table";
 import { formatBytes } from "./utils";
 
+function formatUploadDate(value: string | null) {
+  if (!value) return "Not uploaded";
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function mapVideoStatus(status: VideoListItem["status"]): UploadedVideo["status"] {
+  if (status === "running") return "processing";
+  if (status === "done") return "done";
+  if (status === "failed") return "failed";
+  return "pending";
+}
+
+function toUploadedVideo(video: VideoListItem): UploadedVideo {
+  return {
+    id: video.video_id,
+    videoId: video.video_id,
+    title: video.title,
+    uploadedAt: formatUploadDate(video.uploaded_at ?? video.created_at),
+    status: mapVideoStatus(video.status),
+    size: video.size_bytes === null ? "-" : formatBytes(video.size_bytes),
+    progress: video.status === "done" ? 100 : video.status === "failed" ? 0 : 25,
+  };
+}
+
 export function UploadDashboard() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadControllersRef = useRef(new Map<string, MultipartUploadController>());
   const [isDragging, setIsDragging] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadRows, setUploadRows] = useState<UploadedVideo[]>([]);
+  const [videos, setVideos] = useState<UploadedVideo[]>([]);
+  const [uploadConfig, setUploadConfig] = useState<UploadConfigResponse | null>(null);
+  const [isLoadingVideos, setIsLoadingVideos] = useState(true);
 
-  const progress = selectedFile ? 28 : 0;
-  const tableVideos: UploadedVideo[] = selectedFile
-    ? [
-        {
-          id: "current-upload",
-          title: selectedFile.name,
-          uploadedAt: "Now",
-          status: "uploading",
-          size: formatBytes(selectedFile.size),
-          progress,
-        },
-        ...uploadedVideos,
-      ]
-    : uploadedVideos;
+  const activeVideoIds = new Set(uploadRows.map((row) => row.videoId).filter(Boolean));
+  const tableVideos: UploadedVideo[] = [
+    ...uploadRows,
+    ...videos.filter((video) => !activeVideoIds.has(video.videoId)),
+  ];
+
+  useEffect(() => {
+    const uploadControllers = uploadControllersRef.current;
+
+    return () => {
+      uploadControllers.forEach((controller) => {
+        void controller.cancel();
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    void loadUploadConfig();
+    void loadVideos();
+  }, []);
+
+  async function loadUploadConfig() {
+    try {
+      setUploadConfig(await getUploadConfig());
+    } catch (error: unknown) {
+      toast.error("Upload limits unavailable", {
+        description:
+          error instanceof Error ? error.message : "Unable to load upload configuration",
+      });
+    }
+  }
+
+  async function loadVideos() {
+    setIsLoadingVideos(true);
+    try {
+      const response = await listVideos();
+      setVideos(response.map(toUploadedVideo));
+    } catch (error: unknown) {
+      toast.error("Videos unavailable", {
+        description: error instanceof Error ? error.message : "Unable to load videos",
+      });
+    } finally {
+      setIsLoadingVideos(false);
+    }
+  }
 
   function handleFile(file: File | undefined) {
     if (!file) return;
-    setSelectedFile(file);
+    if (!uploadConfig) {
+      toast.error("Upload limits are still loading");
+      return;
+    }
+
+    const contentType = normalizeContentType(file);
+    const partCount = Math.ceil(file.size / uploadConfig.part_size_bytes);
+
+    if (!uploadConfig.allowed_content_types.includes(contentType)) {
+      toast.error("Unsupported video type", {
+        description: contentType,
+      });
+      return;
+    }
+
+    if (file.size > uploadConfig.max_size_bytes) {
+      toast.error("Video is too large", {
+        description: `Maximum size is ${formatBytes(uploadConfig.max_size_bytes)}`,
+      });
+      return;
+    }
+
+    if (partCount > uploadConfig.max_part_count) {
+      toast.error("Video has too many upload parts", {
+        description: `Maximum part count is ${uploadConfig.max_part_count}`,
+      });
+      return;
+    }
+
+    const controller = createMultipartUploadController({
+      file,
+      uploadConfig,
+      onChange: updateUploadRow,
+    });
+
+    uploadControllersRef.current.set(controller.snapshot.row.id, controller);
+    setUploadRows((current) => [controller.snapshot.row, ...current]);
+
     toast.success("Upload started", {
       description: file.name,
+    });
+
+    void controller.start().catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      toast.error("Upload failed", {
+        description: error instanceof Error ? error.message : file.name,
+      });
+    });
+  }
+
+  function updateUploadRow(snapshot: MultipartUploadSnapshot) {
+    if (!snapshot.row.canCancel && !snapshot.row.canRetry) {
+      uploadControllersRef.current.delete(snapshot.row.id);
+      void loadVideos();
+    }
+
+    setUploadRows((current) =>
+      current.map((row) => (row.id === snapshot.row.id ? snapshot.row : row)),
+    );
+  }
+
+  function handleRetryUpload(rowId: string) {
+    const controller = uploadControllersRef.current.get(rowId);
+    if (!controller) return;
+
+    toast.info("Retrying upload", {
+      description: controller.snapshot.row.title,
+    });
+
+    void controller.retryFailedParts().catch((error: unknown) => {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      toast.error("Retry failed", {
+        description:
+          error instanceof Error ? error.message : controller.snapshot.row.title,
+      });
+    });
+  }
+
+  function handleCancelUpload(rowId: string) {
+    const controller = uploadControllersRef.current.get(rowId);
+    if (!controller) return;
+
+    const title = controller.snapshot.row.title;
+    void controller.cancel().catch(() => undefined);
+    uploadControllersRef.current.delete(rowId);
+    setUploadRows((current) => current.filter((row) => row.id !== rowId));
+    toast.warning("Upload cancelled", {
+      description: title,
     });
   }
 
@@ -81,12 +241,16 @@ export function UploadDashboard() {
           <UploadDropzone
             inputRef={inputRef}
             isDragging={isDragging}
+            allowedContentTypes={uploadConfig?.allowed_content_types ?? []}
+            disabled={!uploadConfig}
             onDraggingChange={setIsDragging}
             onFileSelected={handleFile}
           />
           <UploadsTable
             videos={tableVideos}
-            onCancelUpload={() => setSelectedFile(null)}
+            isLoading={isLoadingVideos}
+            onCancelUpload={handleCancelUpload}
+            onRetryUpload={handleRetryUpload}
           />
         </section>
       </div>

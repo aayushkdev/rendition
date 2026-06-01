@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 type UploadDropzoneProps = {
   inputRef: RefObject<HTMLInputElement | null>;
   isDragging: boolean;
+  allowedContentTypes: string[];
+  disabled?: boolean;
   onDraggingChange: (isDragging: boolean) => void;
   onFileSelected: (file: File | undefined) => void;
 };
@@ -13,11 +15,15 @@ type UploadDropzoneProps = {
 export function UploadDropzone({
   inputRef,
   isDragging,
+  allowedContentTypes,
+  disabled = false,
   onDraggingChange,
   onFileSelected,
 }: UploadDropzoneProps) {
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    if (disabled) return;
+
     onDraggingChange(false);
     onFileSelected(event.dataTransfer.files[0]);
   }
@@ -26,6 +32,7 @@ export function UploadDropzone({
     <div
       onDragOver={(event) => {
         event.preventDefault();
+        if (disabled) return;
         onDraggingChange(true);
       }}
       onDragLeave={() => onDraggingChange(false)}
@@ -38,19 +45,25 @@ export function UploadDropzone({
       <input
         ref={inputRef}
         type="file"
-        accept="video/mp4,video/quicktime,video/x-matroska"
+        accept={allowedContentTypes.join(",")}
         className="hidden"
-        onChange={(event) => onFileSelected(event.target.files?.[0])}
+        disabled={disabled}
+        onChange={(event) => {
+          onFileSelected(event.target.files?.[0]);
+          event.currentTarget.value = "";
+        }}
       />
 
       <div className="grid h-full min-h-[220px] place-items-center">
         <button
           type="button"
+          disabled={disabled}
           onClick={() => inputRef.current?.click()}
           className={cn(
             "grid h-full w-full place-items-center rounded-lg border-2 border-dashed p-8 text-center outline-none transition-colors",
             "border-border bg-background/60 hover:border-primary hover:bg-accent/45",
             "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+            "disabled:cursor-not-allowed disabled:opacity-60",
             isDragging && "border-primary bg-emerald-50",
           )}
         >
@@ -65,7 +78,9 @@ export function UploadDropzone({
               Drop video to upload
             </p>
             <p className="mt-3 text-sm text-muted-foreground">
-              MP4, MOV, or MKV
+              {allowedContentTypes.length > 0
+                ? allowedContentTypes.map((type) => type.split("/").at(-1)?.toUpperCase()).join(", ")
+                : "Loading upload limits"}
             </p>
             <span className="mt-5 inline-flex h-9 items-center gap-2 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground shadow-sm">
               <FolderOpen className="size-4" />
