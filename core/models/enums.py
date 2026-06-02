@@ -6,6 +6,7 @@ class ProcessingStatus(str, enum.Enum):
     uploaded = "uploaded"
     pending = "pending"
     running = "running"
+    partial = "partial"
     done = "done"
     failed = "failed"
 
