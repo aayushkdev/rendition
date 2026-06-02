@@ -3,6 +3,7 @@ export type VideoStatus =
   | "upload_failed"
   | "pending"
   | "processing"
+  | "partial"
   | "done"
   | "failed";
 

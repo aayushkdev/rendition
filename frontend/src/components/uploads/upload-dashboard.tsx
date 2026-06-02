@@ -42,6 +42,7 @@ function formatUploadDate(value: string | null) {
 
 function mapVideoStatus(status: VideoListItem["status"]): UploadedVideo["status"] {
   if (status === "running") return "processing";
+  if (status === "partial") return "partial";
   if (status === "done") return "done";
   if (status === "failed") return "failed";
   return "pending";
@@ -55,7 +56,14 @@ function toUploadedVideo(video: VideoListItem): UploadedVideo {
     uploadedAt: formatUploadDate(video.uploaded_at ?? video.created_at),
     status: mapVideoStatus(video.status),
     size: video.size_bytes === null ? "-" : formatBytes(video.size_bytes),
-    progress: video.status === "done" ? 100 : video.status === "failed" ? 0 : 25,
+    progress:
+      video.status === "done"
+        ? 100
+        : video.status === "failed"
+          ? 0
+          : video.status === "partial"
+            ? 75
+            : 25,
   };
 }
 

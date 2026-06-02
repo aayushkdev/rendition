@@ -20,10 +20,24 @@ export type UploadConfigResponse = {
 
 export type VideoState = {
   video_id: string;
-  status: "uploading" | "uploaded" | "pending" | "running" | "done" | "failed";
+  status:
+    | "uploading"
+    | "uploaded"
+    | "pending"
+    | "running"
+    | "partial"
+    | "done"
+    | "failed";
   renditions: Array<{
     resolution: string;
-    status: "uploading" | "uploaded" | "pending" | "running" | "done" | "failed";
+    status:
+      | "uploading"
+      | "uploaded"
+      | "pending"
+      | "running"
+      | "partial"
+      | "done"
+      | "failed";
   }>;
 };
 

@@ -54,6 +54,7 @@ export function normalizeContentType(file: File) {
 
 function mapVideoStatus(status: string): VideoStatus {
   if (status === "running") return "processing";
+  if (status === "partial") return "partial";
   if (status === "failed") return "failed";
   if (status === "done") return "done";
   return "pending";
