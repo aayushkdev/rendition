@@ -37,7 +37,7 @@ class RabbitMQJobQueuePublisher:
         try:
             connection = pika.BlockingConnection(pika.URLParameters(self._rabbitmq_url))
             channel = connection.channel()
-            setup_encoding_topology(channel)
+            setup_encoding_topology(channel, queue_name=settings.WORKER_QUEUE_NAME)
             yield RabbitMQJobQueueSession(channel)
         except Exception as exc:
             raise QueuePublishError("failed to publish encoding job") from exc
@@ -83,15 +83,16 @@ class RabbitMQJobQueueSession:
 
 def setup_encoding_topology(
     channel: pika.adapters.blocking_connection.BlockingChannel,
+    queue_name: str,
 ) -> None:
     channel.exchange_declare(
         exchange=ENCODING_EXCHANGE,
         exchange_type="direct",
         durable=True,
     )
-    channel.queue_declare(queue="jobs.encode", durable=True)
+    channel.queue_declare(queue=queue_name, durable=True)
     channel.queue_bind(
-        queue="jobs.encode",
+        queue=queue_name,
         exchange=ENCODING_EXCHANGE,
         routing_key=ENCODING_ROUTING_KEY,
     )

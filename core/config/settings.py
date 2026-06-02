@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     UPLOAD_ALLOWED_CONTENT_TYPES: str = "video/mp4,video/quicktime,video/x-matroska"
 
     WORKER_JOB_RETRY_COUNT: int = Field(default=3, ge=0)
+    WORKER_QUEUE_NAME: str = "jobs.encode"
+    WORKER_PREFETCH_COUNT: int = Field(default=1, ge=1)
 
     ENVIRONMENT: str = "local"
 
