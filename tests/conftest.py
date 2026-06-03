@@ -101,6 +101,11 @@ class FakeObjectStorage:
         return self.metadata_by_key.get(key)
 
     def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        if getattr(self, "fail_abort", False):
+            from core.storage import ObjectStorageError
+
+            raise ObjectStorageError("abort failed")
+
         self.aborted_uploads.append({"key": key, "upload_id": upload_id})
 
     def delete_object(self, key: str) -> None:

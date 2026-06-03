@@ -218,3 +218,35 @@ def test_hls_encoder_raises_when_playlist_missing(monkeypatch, tmp_path):
             output_dir=tmp_path / "output",
             resolution="720p",
         )
+
+
+def test_hls_encoder_wraps_ffmpeg_startup_failure(monkeypatch, tmp_path):
+    def fail_start(*_args, **_kwargs):
+        raise OSError("ffmpeg missing")
+
+    monkeypatch.setattr("core.encoding.ffmpeg.subprocess.run", fail_start)
+
+    with pytest.raises(FfmpegError, match="failed to start ffmpeg"):
+        HlsEncoder().encode(
+            input_path=tmp_path / "input.mp4",
+            output_dir=tmp_path / "output",
+            resolution="720p",
+        )
+
+
+def test_hls_encoder_raises_on_ffmpeg_nonzero_return(monkeypatch, tmp_path):
+    class CompletedProcess:
+        returncode = 1
+        stderr = "invalid codec"
+
+    monkeypatch.setattr(
+        "core.encoding.ffmpeg.subprocess.run",
+        lambda *_args, **_kwargs: CompletedProcess(),
+    )
+
+    with pytest.raises(FfmpegError, match="invalid codec"):
+        HlsEncoder().encode(
+            input_path=tmp_path / "input.mp4",
+            output_dir=tmp_path / "output",
+            resolution="720p",
+        )

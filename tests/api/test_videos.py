@@ -222,6 +222,42 @@ def test_refresh_upload_rejects_part_count_mismatch(client):
     }
 
 
+def test_refresh_upload_returns_404_for_missing_video(client):
+    response = client.post(
+        "/api/v1/videos/00000000-0000-0000-0000-000000000000/upload/refresh",
+        json={"part_count": 1},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "video_not_found"
+
+
+def test_refresh_upload_rejects_inactive_upload(client):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+    client.delete(f"/api/v1/videos/{video_id}/upload")
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/refresh",
+        json={"part_count": 1},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "upload_not_active",
+        "message": "video upload is not active",
+        "request_id": response.headers["X-Request-ID"],
+    }
+
+
 def test_abort_upload_marks_video_failed(client, db_session):
     create_response = client.post(
         "/api/v1/videos",
@@ -244,6 +280,59 @@ def test_abort_upload_marks_video_failed(client, db_session):
     state_response = client.get(f"/api/v1/videos/{video_id}")
     assert state_response.status_code == 200
     assert state_response.json()["status"] == "failed"
+
+
+def test_abort_upload_returns_404_for_missing_video(client):
+    response = client.delete(
+        "/api/v1/videos/00000000-0000-0000-0000-000000000000/upload"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "video_not_found"
+
+
+def test_abort_upload_rejects_inactive_upload(client):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+    client.delete(f"/api/v1/videos/{video_id}/upload")
+
+    response = client.delete(f"/api/v1/videos/{video_id}/upload")
+
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "upload_not_active",
+        "message": "video upload is not active",
+        "request_id": response.headers["X-Request-ID"],
+    }
+
+
+def test_abort_upload_storage_failure_marks_session_failed(client, db_session):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+    client.storage.fail_abort = True
+
+    response = client.delete(f"/api/v1/videos/{video_id}/upload")
+
+    assert response.status_code == 502
+    upload_session = db_session.query(UploadSession).one()
+    assert upload_session.status == UploadStatus.failed
+    assert upload_session.error == "storage upload abort failed"
 
 
 def test_complete_upload_rejects_inactive_upload(client):
@@ -472,7 +561,9 @@ def test_complete_upload_metadata_cleanup_failure_records_failed_session(
     assert response.status_code == 502
     upload_session = db_session.query(UploadSession).one()
     assert upload_session.status == UploadStatus.failed
-    assert upload_session.error == "completed upload content type mismatch; cleanup failed"
+    assert (
+        upload_session.error == "completed upload content type mismatch; cleanup failed"
+    )
     assert db_session.query(Rendition).count() == 0
     assert db_session.query(Job).count() == 0
     assert db_session.query(OutboxMessage).count() == 0
