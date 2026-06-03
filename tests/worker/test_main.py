@@ -1,10 +1,11 @@
 from contextlib import contextmanager
 
 import pytest
+import pika
 
 from core.queue.messages import EncodingJobMessage
 from core.services.video_service import ingest_video
-from worker.main import handle_delivery
+from worker.main import connect_with_retry, handle_delivery
 from worker.processor import EncodingProcessorResult
 
 
@@ -147,3 +148,46 @@ def test_handle_delivery_nacks_unexpected_processor_crash(db_session, monkeypatc
     assert channel.acks == []
     assert channel.nacks == [{"delivery_tag": "delivery-1", "requeue": True}]
     assert channel.rejects == []
+
+
+def test_connect_with_retry_returns_after_transient_failures(monkeypatch):
+    connection = object()
+    attempts = []
+
+    def blocking_connection(_parameters):
+        attempts.append("attempt")
+        if len(attempts) < 3:
+            raise pika.exceptions.AMQPConnectionError("rabbitmq unavailable")
+        return connection
+
+    sleeps = []
+    monkeypatch.setattr("worker.main.pika.BlockingConnection", blocking_connection)
+    monkeypatch.setattr(
+        "worker.main.time.sleep", lambda seconds: sleeps.append(seconds)
+    )
+    monkeypatch.setattr("worker.main.settings.RABBITMQ_CONNECT_RETRY_COUNT", 3)
+
+    assert connect_with_retry() is connection
+    assert len(attempts) == 3
+    assert sleeps == [1, 2]
+
+
+def test_connect_with_retry_fails_after_max_attempts(monkeypatch):
+    attempts = []
+
+    def blocking_connection(_parameters):
+        attempts.append("attempt")
+        raise pika.exceptions.AMQPConnectionError("rabbitmq unavailable")
+
+    sleeps = []
+    monkeypatch.setattr("worker.main.pika.BlockingConnection", blocking_connection)
+    monkeypatch.setattr(
+        "worker.main.time.sleep", lambda seconds: sleeps.append(seconds)
+    )
+    monkeypatch.setattr("worker.main.settings.RABBITMQ_CONNECT_RETRY_COUNT", 2)
+
+    with pytest.raises(RuntimeError, match="failed to connect to RabbitMQ"):
+        connect_with_retry()
+
+    assert len(attempts) == 2
+    assert sleeps == [1, 2]
