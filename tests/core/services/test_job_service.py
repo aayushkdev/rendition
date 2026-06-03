@@ -34,6 +34,17 @@ class RecordingStorage:
         )
 
 
+class FailingStorage(RecordingStorage):
+    def upload_bytes(
+        self,
+        key: str,
+        body: bytes,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None:
+        raise RuntimeError("storage upload failed")
+
+
 def test_claim_encoding_job_marks_job_running(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
@@ -255,6 +266,56 @@ def test_terminal_success_generates_master_playlist(db_session):
     assert storage.uploads[0]["content_type"] == "application/vnd.apple.mpegurl"
     assert b"#EXTM3U\n" in storage.uploads[0]["body"]
     assert b"1080p/index.m3u8\n" in storage.uploads[0]["body"]
+
+
+def test_master_playlist_is_not_generated_until_all_renditions_terminal(db_session):
+    storage = RecordingStorage()
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    claim_encoding_job(db_session, job.id, job.video_id, job.rendition_id)
+
+    mark_encoding_job_succeeded(
+        db_session,
+        job.id,
+        output_path=f"hls/{video.id}/{job.rendition.resolution}/index.m3u8",
+        storage=storage,
+    )
+
+    db_session.refresh(video)
+    assert video.status == ProcessingStatus.partial
+    assert video.playback_path is None
+    assert storage.uploads == []
+
+
+def test_master_playlist_upload_failure_does_not_set_playback_path(db_session):
+    storage = FailingStorage()
+    video = ingest_video(db_session, "s3://input/video.mp4")
+
+    for rendition in video.renditions[:-1]:
+        rendition.status = ProcessingStatus.done
+        rendition.output_path = f"hls/{video.id}/{rendition.resolution}/index.m3u8"
+        rendition.jobs[0].status = ProcessingStatus.done
+
+    final_job = video.renditions[-1].jobs[0]
+    db_session.commit()
+    claim_encoding_job(
+        db_session,
+        final_job.id,
+        final_job.video_id,
+        final_job.rendition_id,
+    )
+
+    with pytest.raises(RuntimeError, match="storage upload failed"):
+        mark_encoding_job_succeeded(
+            db_session,
+            final_job.id,
+            output_path=f"hls/{video.id}/{final_job.rendition.resolution}/index.m3u8",
+            storage=storage,
+        )
+
+    db_session.rollback()
+    db_session.refresh(video)
+    assert video.playback_path is None
 
 
 def test_terminal_partial_generates_master_playlist_for_successful_renditions(

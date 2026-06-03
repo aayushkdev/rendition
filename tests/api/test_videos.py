@@ -415,6 +415,69 @@ def test_complete_upload_rejects_storage_metadata_mismatch(client, db_session):
     }
 
 
+def test_complete_upload_storage_failure_does_not_create_jobs(client, db_session):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+    client.storage.fail_complete = True
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/complete",
+        json={
+            "parts": [{"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
+        },
+    )
+
+    assert response.status_code == 502
+    upload_session = db_session.query(UploadSession).one()
+    assert upload_session.status == UploadStatus.failed
+    assert upload_session.error == "storage upload completion failed"
+    assert db_session.query(Rendition).count() == 0
+    assert db_session.query(Job).count() == 0
+    assert db_session.query(OutboxMessage).count() == 0
+    assert client.publisher.published_messages == []
+
+
+def test_complete_upload_metadata_cleanup_failure_records_failed_session(
+    client,
+    db_session,
+):
+    create_response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 12_345,
+            "part_count": 1,
+        },
+    )
+    video_id = create_response.json()["video_id"]
+    client.storage.completed_content_type = "application/octet-stream"
+    client.storage.fail_delete = True
+
+    response = client.post(
+        f"/api/v1/videos/{video_id}/upload/complete",
+        json={
+            "parts": [{"part_number": 1, "etag": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
+        },
+    )
+
+    assert response.status_code == 502
+    upload_session = db_session.query(UploadSession).one()
+    assert upload_session.status == UploadStatus.failed
+    assert upload_session.error == "completed upload content type mismatch; cleanup failed"
+    assert db_session.query(Rendition).count() == 0
+    assert db_session.query(Job).count() == 0
+    assert db_session.query(OutboxMessage).count() == 0
+
+
 def test_get_video_returns_404_for_missing_video(client):
     response = client.get(
         "/api/v1/videos/00000000-0000-0000-0000-000000000000",

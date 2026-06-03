@@ -141,6 +141,7 @@ def process_encoding_message(
     session_scope: SessionScope,
     message: EncodingJobMessage,
     processor: EncodingProcessor,
+    storage: ObjectStorage | None = None,
 ) -> WorkerMessageAction:
     try:
         with session_scope() as db:
@@ -160,7 +161,12 @@ def process_encoding_message(
         result = processor.process(context)
     except Exception as exc:
         with session_scope() as db:
-            should_retry = mark_encoding_job_failed(db, context.job_id, str(exc))
+            should_retry = mark_encoding_job_failed(
+                db,
+                context.job_id,
+                str(exc),
+                storage=storage,
+            )
         if should_retry:
             return WorkerMessageAction.requeue
         return WorkerMessageAction.ack
@@ -172,6 +178,7 @@ def process_encoding_message(
                 context.job_id,
                 result.skipped_reason,
                 source_metadata=result.source_metadata,
+                storage=storage,
             )
         else:
             mark_encoding_job_succeeded(
@@ -179,5 +186,6 @@ def process_encoding_message(
                 context.job_id,
                 output_path=result.output_path,
                 source_metadata=result.source_metadata,
+                storage=storage,
             )
     return WorkerMessageAction.ack
