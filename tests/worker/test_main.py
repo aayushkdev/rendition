@@ -5,6 +5,7 @@ import pytest
 from core.queue.messages import EncodingJobMessage
 from core.services.video_service import ingest_video
 from worker.main import handle_delivery
+from worker.processor import EncodingProcessorResult
 
 
 class RecordingChannel:
@@ -29,7 +30,9 @@ class DeliveryMethod:
 
 class SuccessfulProcessor:
     def process(self, _context):
-        return "renditions/video/1080p/master.m3u8"
+        return EncodingProcessorResult(
+            output_path="renditions/video/1080p/master.m3u8",
+        )
 
 
 class FailingProcessor:

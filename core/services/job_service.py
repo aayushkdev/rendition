@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from core.models.enums import ProcessingStatus
 from core.models.job import Job
 from core.models.rendition import Rendition
+from core.encoding import VideoSourceMetadata
 
 
 class EncodingJobError(RuntimeError):
@@ -47,22 +48,28 @@ def _get_job_for_update(db: Session, job_id: UUID) -> Job | None:
 
 def derive_video_status(renditions: list[Rendition]) -> ProcessingStatus:
     statuses = [rendition.status for rendition in renditions]
+    available_statuses = {
+        status for status in statuses if status != ProcessingStatus.skipped
+    }
 
     if not statuses:
         return ProcessingStatus.pending
 
-    if all(status == ProcessingStatus.done for status in statuses):
+    if not available_statuses:
+        return ProcessingStatus.failed
+
+    if all(status == ProcessingStatus.done for status in available_statuses):
         return ProcessingStatus.done
 
-    if any(status == ProcessingStatus.failed for status in statuses):
-        if any(status == ProcessingStatus.done for status in statuses):
+    if any(status == ProcessingStatus.failed for status in available_statuses):
+        if any(status == ProcessingStatus.done for status in available_statuses):
             return ProcessingStatus.partial
         return ProcessingStatus.failed
 
-    if any(status == ProcessingStatus.running for status in statuses):
+    if any(status == ProcessingStatus.running for status in available_statuses):
         return ProcessingStatus.running
 
-    if any(status == ProcessingStatus.done for status in statuses):
+    if any(status == ProcessingStatus.done for status in available_statuses):
         return ProcessingStatus.partial
 
     return ProcessingStatus.pending
@@ -120,6 +127,18 @@ def _build_encoding_context(job: Job) -> EncodingJobContext:
     )
 
 
+def _apply_source_metadata(
+    job: Job, source_metadata: VideoSourceMetadata | None
+) -> None:
+    if source_metadata is None:
+        return
+
+    job.rendition.video.source_width = source_metadata.width
+    job.rendition.video.source_height = source_metadata.height
+    job.rendition.video.source_bitrate = source_metadata.bitrate
+    job.rendition.video.source_duration_seconds = source_metadata.duration_seconds
+
+
 def claim_encoding_job(
     db: Session,
     job_id: UUID,
@@ -152,6 +171,7 @@ def mark_encoding_job_succeeded(
     db: Session,
     job_id: UUID,
     output_path: str | None = None,
+    source_metadata: VideoSourceMetadata | None = None,
 ) -> None:
     job = _get_job_for_update(db, job_id)
 
@@ -168,6 +188,32 @@ def mark_encoding_job_succeeded(
     if output_path is not None:
         job.rendition.output_path = output_path
 
+    _apply_source_metadata(job, source_metadata)
+    job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
+
+    db.commit()
+
+
+def mark_encoding_job_skipped(
+    db: Session,
+    job_id: UUID,
+    reason: str,
+    source_metadata: VideoSourceMetadata | None = None,
+) -> None:
+    job = _get_job_for_update(db, job_id)
+
+    if job is None:
+        raise EncodingJobNotFoundError("encoding job not found")
+
+    now = datetime.now(timezone.utc)
+    job.status = ProcessingStatus.done
+    job.finished_at = now
+    job.error = reason
+    job.rendition.status = ProcessingStatus.skipped
+    job.rendition.completed_at = now
+    job.rendition.error = reason
+    job.rendition.output_path = None
+    _apply_source_metadata(job, source_metadata)
     job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
 
     db.commit()

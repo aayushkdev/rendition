@@ -1,6 +1,7 @@
 from enum import Enum
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Protocol
@@ -8,13 +9,20 @@ from typing import Protocol
 from sqlalchemy.orm import Session
 
 from core.config import settings
-from core.encoding import HlsEncoder
+from core.encoding import (
+    HlsEncoder,
+    VideoProber,
+    VideoSourceMetadata,
+    get_hls_preset,
+    is_hls_preset_applicable,
+)
 from core.queue.messages import EncodingJobMessage
 from core.services.job_service import (
     EncodingJobContext,
     EncodingJobError,
     claim_encoding_job,
     mark_encoding_job_failed,
+    mark_encoding_job_skipped,
     mark_encoding_job_succeeded,
 )
 from core.storage import (
@@ -36,8 +44,15 @@ class WorkerMessageAction(str, Enum):
     reject = "reject"
 
 
+@dataclass(frozen=True)
+class EncodingProcessorResult:
+    output_path: str | None = None
+    source_metadata: VideoSourceMetadata | None = None
+    skipped_reason: str | None = None
+
+
 class EncodingProcessor(Protocol):
-    def process(self, context: EncodingJobContext) -> str | None: ...
+    def process(self, context: EncodingJobContext) -> EncodingProcessorResult: ...
 
 
 class FfmpegEncodingProcessor:
@@ -45,13 +60,15 @@ class FfmpegEncodingProcessor:
         self,
         storage: ObjectStorage | None = None,
         encoder: HlsEncoder | None = None,
+        prober: VideoProber | None = None,
         temp_root: Path | None = None,
     ) -> None:
         self._storage = storage or get_object_storage()
         self._encoder = encoder or HlsEncoder()
+        self._prober = prober or VideoProber()
         self._temp_root = temp_root or Path(settings.WORKER_TEMP_ROOT)
 
-    def process(self, context: EncodingJobContext) -> str | None:
+    def process(self, context: EncodingJobContext) -> EncodingProcessorResult:
         self._temp_root.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(
             prefix=f"rendition-{context.job_id}-",
@@ -62,12 +79,26 @@ class FfmpegEncodingProcessor:
             output_dir = job_dir / "hls"
 
             self._storage.download_file(context.source, str(input_path))
+            source_metadata = self._prober.probe(input_path)
+            preset = get_hls_preset(context.resolution)
+            if not is_hls_preset_applicable(preset, source_metadata):
+                return EncodingProcessorResult(
+                    source_metadata=source_metadata,
+                    skipped_reason=(
+                        f"{context.resolution} is not applicable for "
+                        f"{source_metadata.width}x{source_metadata.height} source"
+                    ),
+                )
+
             self._encoder.encode(
                 input_path=input_path,
                 output_dir=output_dir,
                 resolution=context.resolution,
             )
-            return self._upload_hls_outputs(context, output_dir)
+            return EncodingProcessorResult(
+                output_path=self._upload_hls_outputs(context, output_dir),
+                source_metadata=source_metadata,
+            )
 
     def _upload_hls_outputs(
         self,
@@ -126,7 +157,7 @@ def process_encoding_message(
         return WorkerMessageAction.ack
 
     try:
-        output_path = processor.process(context)
+        result = processor.process(context)
     except Exception as exc:
         with session_scope() as db:
             should_retry = mark_encoding_job_failed(db, context.job_id, str(exc))
@@ -135,5 +166,18 @@ def process_encoding_message(
         return WorkerMessageAction.ack
 
     with session_scope() as db:
-        mark_encoding_job_succeeded(db, context.job_id, output_path=output_path)
+        if result.skipped_reason is not None:
+            mark_encoding_job_skipped(
+                db,
+                context.job_id,
+                result.skipped_reason,
+                source_metadata=result.source_metadata,
+            )
+        else:
+            mark_encoding_job_succeeded(
+                db,
+                context.job_id,
+                output_path=result.output_path,
+                source_metadata=result.source_metadata,
+            )
     return WorkerMessageAction.ack

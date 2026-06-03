@@ -3,12 +3,18 @@ from contextlib import contextmanager
 from core.models.enums import ProcessingStatus
 from core.queue.messages import EncodingJobMessage
 from core.services.video_service import ingest_video
-from worker.processor import WorkerMessageAction, process_encoding_message
+from worker.processor import (
+    EncodingProcessorResult,
+    WorkerMessageAction,
+    process_encoding_message,
+)
 
 
 class SuccessfulProcessor:
     def process(self, _job):
-        return "renditions/video/1080p/master.m3u8"
+        return EncodingProcessorResult(
+            output_path="renditions/video/1080p/master.m3u8",
+        )
 
 
 class FailingProcessor:

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from core.encoding.probe import VideoSourceMetadata
+
 
 class EncodingPresetError(ValueError):
     pass
@@ -40,6 +42,20 @@ HLS_PRESETS: dict[str, EncodingPreset] = {
 }
 
 DEFAULT_HLS_RENDITIONS = list(HLS_PRESETS.values())
+
+
+def is_hls_preset_applicable(
+    preset: EncodingPreset,
+    metadata: VideoSourceMetadata,
+    bitrate_headroom: float = 1.25,
+) -> bool:
+    if preset.width > metadata.width or preset.height > metadata.height:
+        return False
+
+    if metadata.bitrate is None:
+        return True
+
+    return preset.video_bitrate <= metadata.bitrate * bitrate_headroom
 
 
 def get_hls_preset(resolution: str) -> EncodingPreset:

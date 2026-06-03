@@ -2,6 +2,7 @@ from uuid import UUID
 
 import pytest
 
+from core.encoding import VideoSourceMetadata
 from core.services.job_service import EncodingJobContext
 from worker.processor import FfmpegEncodingProcessor
 
@@ -62,6 +63,24 @@ class FakeHlsEncoder:
             (output_dir / "segments" / "segment_00001.ts").write_bytes(b"segment-1")
 
 
+class FakeVideoProber:
+    def __init__(
+        self,
+        metadata: VideoSourceMetadata = VideoSourceMetadata(
+            width=1280,
+            height=720,
+            bitrate=3_000_000,
+            duration_seconds=42.5,
+        ),
+    ):
+        self.metadata = metadata
+        self.calls = []
+
+    def probe(self, input_path):
+        self.calls.append(input_path)
+        return self.metadata
+
+
 def encoding_context() -> EncodingJobContext:
     return EncodingJobContext(
         job_id=JOB_ID,
@@ -83,12 +102,22 @@ def test_ffmpeg_processor_uploads_segments_then_playlist(tmp_path):
     processor = FfmpegEncodingProcessor(
         storage=storage,
         encoder=encoder,
+        prober=FakeVideoProber(),
         temp_root=tmp_path,
     )
 
-    playlist_key = processor.process(encoding_context())
+    result = processor.process(encoding_context())
 
-    assert playlist_key == ("hls/11111111-1111-1111-1111-111111111111/720p/index.m3u8")
+    assert result.output_path == (
+        "hls/11111111-1111-1111-1111-111111111111/720p/index.m3u8"
+    )
+    assert result.source_metadata == VideoSourceMetadata(
+        width=1280,
+        height=720,
+        bitrate=3_000_000,
+        duration_seconds=42.5,
+    )
+    assert result.skipped_reason is None
     assert storage.downloads[0]["key"] == "source/video/original.mp4"
     assert encoder.calls[0]["resolution"] == "720p"
     assert [upload["key"] for upload in storage.uploads] == [
@@ -105,10 +134,37 @@ def test_ffmpeg_processor_rejects_empty_hls_output(tmp_path):
     processor = FfmpegEncodingProcessor(
         storage=RecordingStorage(),
         encoder=FakeHlsEncoder(create_segments=False),
+        prober=FakeVideoProber(),
         temp_root=tmp_path,
     )
 
     with pytest.raises(RuntimeError, match="did not create any segments"):
         processor.process(encoding_context())
 
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ffmpeg_processor_skips_inapplicable_rendition(tmp_path):
+    storage = RecordingStorage()
+    encoder = FakeHlsEncoder()
+    metadata = VideoSourceMetadata(
+        width=854,
+        height=480,
+        bitrate=1_000_000,
+        duration_seconds=30.0,
+    )
+    processor = FfmpegEncodingProcessor(
+        storage=storage,
+        encoder=encoder,
+        prober=FakeVideoProber(metadata),
+        temp_root=tmp_path,
+    )
+
+    result = processor.process(encoding_context())
+
+    assert result.output_path is None
+    assert result.source_metadata == metadata
+    assert result.skipped_reason == "720p is not applicable for 854x480 source"
+    assert encoder.calls == []
+    assert storage.uploads == []
     assert list(tmp_path.iterdir()) == []

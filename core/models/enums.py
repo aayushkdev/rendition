@@ -8,6 +8,7 @@ class ProcessingStatus(str, enum.Enum):
     running = "running"
     partial = "partial"
     done = "done"
+    skipped = "skipped"
     failed = "failed"
 
 

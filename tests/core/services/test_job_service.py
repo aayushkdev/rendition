@@ -1,11 +1,13 @@
 import pytest
 
+from core.encoding import VideoSourceMetadata
 from core.models.enums import ProcessingStatus
 from core.services.job_service import (
     EncodingJobMessageMismatchError,
     claim_encoding_job,
     derive_video_status,
     mark_encoding_job_failed,
+    mark_encoding_job_skipped,
     mark_encoding_job_succeeded,
 )
 from core.services.video_service import ingest_video
@@ -84,6 +86,58 @@ def test_mark_encoding_job_succeeded_updates_rendition(db_session):
     assert job.rendition.status == ProcessingStatus.done
     assert job.rendition.output_path == "renditions/video/1080p/master.m3u8"
     assert job.rendition.video.status == ProcessingStatus.partial
+
+
+def test_mark_encoding_job_succeeded_stores_source_metadata(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    claim_encoding_job(db_session, job.id, job.video_id, job.rendition_id)
+
+    mark_encoding_job_succeeded(
+        db=db_session,
+        job_id=job.id,
+        output_path="renditions/video/1080p/master.m3u8",
+        source_metadata=VideoSourceMetadata(
+            width=1920,
+            height=1080,
+            bitrate=4_000_000,
+            duration_seconds=72.5,
+        ),
+    )
+
+    db_session.refresh(video)
+    assert video.source_width == 1920
+    assert video.source_height == 1080
+    assert video.source_bitrate == 4_000_000
+    assert video.source_duration_seconds == 72.5
+
+
+def test_mark_encoding_job_skipped_updates_rendition_and_source_metadata(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    claim_encoding_job(db_session, job.id, job.video_id, job.rendition_id)
+
+    mark_encoding_job_skipped(
+        db=db_session,
+        job_id=job.id,
+        reason="1080p is not applicable for 1280x720 source",
+        source_metadata=VideoSourceMetadata(
+            width=1280,
+            height=720,
+            bitrate=2_500_000,
+            duration_seconds=44.0,
+        ),
+    )
+
+    db_session.refresh(job)
+    assert job.status == ProcessingStatus.done
+    assert job.error == "1080p is not applicable for 1280x720 source"
+    assert job.rendition.status == ProcessingStatus.skipped
+    assert job.rendition.output_path is None
+    assert job.rendition.video.source_width == 1280
+    assert job.rendition.video.source_height == 720
+    assert job.rendition.video.source_bitrate == 2_500_000
+    assert job.rendition.video.source_duration_seconds == 44.0
 
 
 def test_mark_encoding_job_failed_returns_retry_decision(db_session):
@@ -185,4 +239,13 @@ def test_derive_video_status_from_renditions():
             ]
         )
         == ProcessingStatus.failed
+    )
+    assert (
+        derive_video_status(
+            [
+                RenditionStatus(ProcessingStatus.done),
+                RenditionStatus(ProcessingStatus.skipped),
+            ]
+        )
+        == ProcessingStatus.done
     )
