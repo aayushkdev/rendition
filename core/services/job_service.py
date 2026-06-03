@@ -8,6 +8,8 @@ from core.models.enums import ProcessingStatus
 from core.models.job import Job
 from core.models.rendition import Rendition
 from core.encoding import VideoSourceMetadata
+from core.services.playback_service import publish_master_playlist_if_ready
+from core.storage import ObjectStorage
 
 
 class EncodingJobError(RuntimeError):
@@ -172,6 +174,7 @@ def mark_encoding_job_succeeded(
     job_id: UUID,
     output_path: str | None = None,
     source_metadata: VideoSourceMetadata | None = None,
+    storage: ObjectStorage | None = None,
 ) -> None:
     job = _get_job_for_update(db, job_id)
 
@@ -190,6 +193,7 @@ def mark_encoding_job_succeeded(
 
     _apply_source_metadata(job, source_metadata)
     job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
+    publish_master_playlist_if_ready(job.rendition.video, storage=storage)
 
     db.commit()
 
@@ -199,6 +203,7 @@ def mark_encoding_job_skipped(
     job_id: UUID,
     reason: str,
     source_metadata: VideoSourceMetadata | None = None,
+    storage: ObjectStorage | None = None,
 ) -> None:
     job = _get_job_for_update(db, job_id)
 
@@ -215,6 +220,7 @@ def mark_encoding_job_skipped(
     job.rendition.output_path = None
     _apply_source_metadata(job, source_metadata)
     job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
+    publish_master_playlist_if_ready(job.rendition.video, storage=storage)
 
     db.commit()
 
@@ -223,6 +229,7 @@ def mark_encoding_job_failed(
     db: Session,
     job_id: UUID,
     error: str,
+    storage: ObjectStorage | None = None,
 ) -> bool:
     job = _get_job_for_update(db, job_id)
 
@@ -239,6 +246,8 @@ def mark_encoding_job_failed(
     job.rendition.error = error
 
     job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
+    if not should_retry:
+        publish_master_playlist_if_ready(job.rendition.video, storage=storage)
 
     db.commit()
     return should_retry

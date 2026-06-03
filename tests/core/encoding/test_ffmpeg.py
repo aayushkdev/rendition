@@ -8,8 +8,10 @@ from core.encoding import (
     VideoProbeError,
     VideoSourceMetadata,
     build_hls_ffmpeg_command,
+    build_hls_master_playlist,
     get_hls_preset,
     is_hls_preset_applicable,
+    MasterPlaylistRendition,
     parse_ffprobe_output,
 )
 from core.encoding.ffmpeg import FfmpegError
@@ -97,6 +99,35 @@ def test_build_hls_ffmpeg_command_contains_expected_hls_options():
     assert (
         "scale=w=854:h=480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2"
         in command
+    )
+
+
+def test_build_hls_master_playlist_lists_completed_renditions():
+    playlist = build_hls_master_playlist(
+        video_id="11111111-1111-1111-1111-111111111111",
+        renditions=[
+            MasterPlaylistRendition(
+                resolution="720p",
+                output_path=(
+                    "hls/11111111-1111-1111-1111-111111111111/720p/index.m3u8"
+                ),
+            ),
+            MasterPlaylistRendition(
+                resolution="480p",
+                output_path=(
+                    "hls/11111111-1111-1111-1111-111111111111/480p/index.m3u8"
+                ),
+            ),
+        ],
+    )
+
+    assert playlist == (
+        "#EXTM3U\n"
+        "#EXT-X-VERSION:3\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720\n"
+        "720p/index.m3u8\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=854x480\n"
+        "480p/index.m3u8\n"
     )
 
 

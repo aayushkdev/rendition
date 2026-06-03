@@ -35,6 +35,7 @@ class Video(Base):
     source_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_bitrate: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    playback_path: Mapped[str | None] = mapped_column(String, nullable=True)
 
     status: Mapped[ProcessingStatus] = mapped_column(
         Enum(ProcessingStatus, name="processing_status"),

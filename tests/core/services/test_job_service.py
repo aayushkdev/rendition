@@ -13,6 +13,27 @@ from core.services.job_service import (
 from core.services.video_service import ingest_video
 
 
+class RecordingStorage:
+    def __init__(self):
+        self.uploads = []
+
+    def upload_bytes(
+        self,
+        key: str,
+        body: bytes,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None:
+        self.uploads.append(
+            {
+                "key": key,
+                "body": body,
+                "content_type": content_type,
+                "cache_control": cache_control,
+            }
+        )
+
+
 def test_claim_encoding_job_marks_job_running(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
@@ -206,6 +227,122 @@ def test_failed_rendition_keeps_completed_renditions_partially_available(db_sess
     db_session.refresh(video)
     assert should_retry is False
     assert video.status == ProcessingStatus.partial
+
+
+def test_terminal_success_generates_master_playlist(db_session):
+    storage = RecordingStorage()
+    video = ingest_video(db_session, "s3://input/video.mp4")
+
+    for rendition in video.renditions:
+        claim_encoding_job(
+            db_session,
+            rendition.jobs[0].id,
+            rendition.jobs[0].video_id,
+            rendition.jobs[0].rendition_id,
+        )
+        mark_encoding_job_succeeded(
+            db_session,
+            rendition.jobs[0].id,
+            output_path=f"hls/{video.id}/{rendition.resolution}/index.m3u8",
+            storage=storage,
+        )
+
+    db_session.refresh(video)
+    assert video.status == ProcessingStatus.done
+    assert video.playback_path == f"hls/{video.id}/master.m3u8"
+    assert len(storage.uploads) == 1
+    assert storage.uploads[0]["key"] == f"hls/{video.id}/master.m3u8"
+    assert storage.uploads[0]["content_type"] == "application/vnd.apple.mpegurl"
+    assert b"#EXTM3U\n" in storage.uploads[0]["body"]
+    assert b"1080p/index.m3u8\n" in storage.uploads[0]["body"]
+
+
+def test_terminal_partial_generates_master_playlist_for_successful_renditions(
+    db_session,
+):
+    storage = RecordingStorage()
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    done_rendition = video.renditions[0]
+    failing_rendition = video.renditions[1]
+    skipped_rendition = video.renditions[2]
+
+    claim_encoding_job(
+        db_session,
+        done_rendition.jobs[0].id,
+        done_rendition.jobs[0].video_id,
+        done_rendition.jobs[0].rendition_id,
+    )
+    mark_encoding_job_succeeded(
+        db_session,
+        done_rendition.jobs[0].id,
+        output_path=f"hls/{video.id}/{done_rendition.resolution}/index.m3u8",
+        storage=storage,
+    )
+    claim_encoding_job(
+        db_session,
+        skipped_rendition.jobs[0].id,
+        skipped_rendition.jobs[0].video_id,
+        skipped_rendition.jobs[0].rendition_id,
+    )
+    mark_encoding_job_skipped(
+        db_session,
+        skipped_rendition.jobs[0].id,
+        "rendition not applicable",
+        storage=storage,
+    )
+    claim_encoding_job(
+        db_session,
+        failing_rendition.jobs[0].id,
+        failing_rendition.jobs[0].video_id,
+        failing_rendition.jobs[0].rendition_id,
+    )
+    failing_rendition.jobs[0].attempt_count = failing_rendition.jobs[0].max_attempts
+    db_session.commit()
+
+    should_retry = mark_encoding_job_failed(
+        db_session,
+        failing_rendition.jobs[0].id,
+        "ffmpeg failed",
+        storage=storage,
+    )
+
+    db_session.refresh(video)
+    assert should_retry is False
+    assert video.status == ProcessingStatus.partial
+    assert video.playback_path == f"hls/{video.id}/master.m3u8"
+    assert len(storage.uploads) == 1
+    assert (
+        f"{done_rendition.resolution}/index.m3u8\n".encode()
+        in storage.uploads[0]["body"]
+    )
+    assert (
+        f"{failing_rendition.resolution}/index.m3u8\n".encode()
+        not in storage.uploads[0]["body"]
+    )
+
+
+def test_all_skipped_renditions_do_not_create_playback_path(db_session):
+    storage = RecordingStorage()
+    video = ingest_video(db_session, "s3://input/video.mp4")
+
+    for rendition in video.renditions:
+        claim_encoding_job(
+            db_session,
+            rendition.jobs[0].id,
+            rendition.jobs[0].video_id,
+            rendition.jobs[0].rendition_id,
+        )
+        mark_encoding_job_skipped(
+            db_session,
+            rendition.jobs[0].id,
+            "rendition not applicable",
+            storage=storage,
+        )
+
+    db_session.refresh(video)
+    assert video.status == ProcessingStatus.failed
+    assert video.playback_path is None
+    assert storage.uploads == []
 
 
 def test_derive_video_status_from_renditions():
