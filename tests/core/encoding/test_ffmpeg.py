@@ -6,6 +6,7 @@ from core.encoding import (
     EncodingPresetError,
     HlsEncoder,
     VideoProbeError,
+    VideoProber,
     VideoSourceMetadata,
     build_hls_ffmpeg_command,
     build_hls_master_playlist,
@@ -82,6 +83,74 @@ def test_parse_ffprobe_output_uses_stream_and_format_metadata():
 def test_parse_ffprobe_output_rejects_missing_dimensions():
     with pytest.raises(VideoProbeError, match="source dimensions"):
         parse_ffprobe_output('{"streams": [{"width": 1920}], "format": {}}')
+
+
+def test_video_prober_runs_ffprobe_and_parses_output(monkeypatch, tmp_path):
+    class CompletedProcess:
+        returncode = 0
+        stdout = """
+        {
+          "streams": [
+            {"width": 1280, "height": 720, "bit_rate": "2500000"}
+          ],
+          "format": {"duration": "42.5"}
+        }
+        """
+        stderr = ""
+
+    calls = []
+
+    def run(command, capture_output, check, text):
+        calls.append(
+            {
+                "command": command,
+                "capture_output": capture_output,
+                "check": check,
+                "text": text,
+            }
+        )
+        return CompletedProcess()
+
+    monkeypatch.setattr("core.encoding.probe.subprocess.run", run)
+
+    metadata = VideoProber().probe(tmp_path / "input.mp4")
+
+    assert metadata == VideoSourceMetadata(
+        width=1280,
+        height=720,
+        bitrate=2_500_000,
+        duration_seconds=42.5,
+    )
+    assert calls[0]["command"][0] == "ffprobe"
+    assert str(tmp_path / "input.mp4") in calls[0]["command"]
+    assert calls[0]["capture_output"] is True
+    assert calls[0]["check"] is False
+    assert calls[0]["text"] is True
+
+
+def test_video_prober_raises_on_ffprobe_failure(monkeypatch, tmp_path):
+    class CompletedProcess:
+        returncode = 1
+        stdout = ""
+        stderr = "invalid input"
+
+    monkeypatch.setattr(
+        "core.encoding.probe.subprocess.run",
+        lambda *_args, **_kwargs: CompletedProcess(),
+    )
+
+    with pytest.raises(VideoProbeError, match="invalid input"):
+        VideoProber().probe(tmp_path / "input.mp4")
+
+
+def test_video_prober_wraps_startup_failures(monkeypatch, tmp_path):
+    def fail_start(*_args, **_kwargs):
+        raise OSError("ffprobe missing")
+
+    monkeypatch.setattr("core.encoding.probe.subprocess.run", fail_start)
+
+    with pytest.raises(VideoProbeError, match="failed to start ffprobe"):
+        VideoProber().probe(tmp_path / "input.mp4")
 
 
 def test_build_hls_ffmpeg_command_contains_expected_hls_options():
