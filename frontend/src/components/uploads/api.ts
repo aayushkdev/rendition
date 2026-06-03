@@ -27,6 +27,7 @@ export type VideoState = {
     | "running"
     | "partial"
     | "done"
+    | "skipped"
     | "failed";
   renditions: Array<{
     resolution: string;
@@ -37,6 +38,7 @@ export type VideoState = {
       | "running"
       | "partial"
       | "done"
+      | "skipped"
       | "failed";
   }>;
 };

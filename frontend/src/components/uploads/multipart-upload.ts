@@ -57,6 +57,7 @@ function mapVideoStatus(status: string): VideoStatus {
   if (status === "partial") return "partial";
   if (status === "failed") return "failed";
   if (status === "done") return "done";
+  if (status === "skipped") return "done";
   return "pending";
 }
 

@@ -44,6 +44,7 @@ function mapVideoStatus(status: VideoListItem["status"]): UploadedVideo["status"
   if (status === "running") return "processing";
   if (status === "partial") return "partial";
   if (status === "done") return "done";
+  if (status === "skipped") return "done";
   if (status === "failed") return "failed";
   return "pending";
 }
