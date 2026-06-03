@@ -8,6 +8,7 @@ from api.schemas.video import (
     VideoState,
 )
 from core.config import settings
+from core.encoding import DEFAULT_HLS_RENDITIONS
 from core.models.video import Video
 from core.models.rendition import Rendition
 from core.models.job import Job
@@ -16,13 +17,6 @@ from core.models.enums import ProcessingStatus
 
 class VideoNotFoundError(LookupError):
     pass
-
-
-DEFAULT_RENDITIONS = [
-    {"resolution": "1080p", "bitrate": 5_000_000},
-    {"resolution": "720p", "bitrate": 2_500_000},
-    {"resolution": "480p", "bitrate": 1_000_000},
-]
 
 
 def _create_renditions_and_jobs(
@@ -34,11 +28,11 @@ def _create_renditions_and_jobs(
         return []
 
     jobs: list[Job] = []
-    for rendition_config in DEFAULT_RENDITIONS:
+    for rendition_config in DEFAULT_HLS_RENDITIONS:
         rendition = Rendition(
             video_id=video.id,
-            resolution=rendition_config["resolution"],
-            bitrate=rendition_config["bitrate"],
+            resolution=rendition_config.resolution,
+            bitrate=rendition_config.video_bitrate,
             status=ProcessingStatus.pending,
         )
         db.add(rendition)

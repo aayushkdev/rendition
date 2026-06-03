@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     WORKER_JOB_RETRY_COUNT: int = Field(default=3, ge=0)
     WORKER_QUEUE_NAME: str = "jobs.encode"
     WORKER_PREFETCH_COUNT: int = Field(default=1, ge=1)
+    WORKER_TEMP_ROOT: str = "/tmp/rendition"
 
     ENVIRONMENT: str = "local"
 

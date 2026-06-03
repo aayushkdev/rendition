@@ -4,11 +4,8 @@ from core.models.enums import ProcessingStatus
 from core.models.job import Job
 from core.models.rendition import Rendition
 from core.models.video import Video
-from core.services.video_service import (
-    DEFAULT_RENDITIONS,
-    get_video_state,
-    ingest_video,
-)
+from core.encoding import DEFAULT_HLS_RENDITIONS
+from core.services.video_service import get_video_state, ingest_video
 
 
 def test_ingest_video_creates_video_renditions_and_jobs(db_session):
@@ -18,14 +15,12 @@ def test_ingest_video_creates_video_renditions_and_jobs(db_session):
     assert video.status == ProcessingStatus.pending
 
     assert db_session.query(Video).count() == 1
-    assert db_session.query(Rendition).count() == len(DEFAULT_RENDITIONS)
-    assert db_session.query(Job).count() == len(DEFAULT_RENDITIONS)
+    assert db_session.query(Rendition).count() == len(DEFAULT_HLS_RENDITIONS)
+    assert db_session.query(Job).count() == len(DEFAULT_HLS_RENDITIONS)
 
     renditions = db_session.query(Rendition).order_by(Rendition.bitrate.desc()).all()
-    assert [rendition.resolution for rendition in renditions] == [
-        "1080p",
-        "720p",
-        "480p",
+    assert [(rendition.resolution, rendition.bitrate) for rendition in renditions] == [
+        (preset.resolution, preset.video_bitrate) for preset in DEFAULT_HLS_RENDITIONS
     ]
     assert all(rendition.status == ProcessingStatus.pending for rendition in renditions)
 
@@ -37,7 +32,7 @@ def test_get_video_state_returns_video_with_renditions(db_session):
 
     assert state.video_id == video.id
     assert state.status == ProcessingStatus.pending
-    assert len(state.renditions) == len(DEFAULT_RENDITIONS)
+    assert len(state.renditions) == len(DEFAULT_HLS_RENDITIONS)
 
 
 def test_get_video_state_returns_none_for_missing_video(db_session):
