@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from core.models.enums import ProcessingStatus
 from core.queue.messages import EncodingJobMessage
 from core.services.video_service import ingest_video
+from core.storage.s3 import CompletedUploadPart, MultipartUploadSession, ObjectMetadata
 from worker.processor import (
     EncodingProcessorResult,
     WorkerMessageAction,
@@ -11,20 +12,55 @@ from worker.processor import (
 
 
 class SuccessfulProcessor:
-    def process(self, _job):
+    def process(self, context):
         return EncodingProcessorResult(
             output_path="renditions/video/1080p/master.m3u8",
         )
 
 
 class FailingProcessor:
-    def process(self, _job):
+    def process(self, context):
         raise RuntimeError("ffmpeg failed")
 
 
 class RecordingStorage:
+    bucket = "test-bucket"
+
     def __init__(self):
         self.uploads = []
+
+    def create_multipart_upload(
+        self,
+        key: str,
+        content_type: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
+        raise NotImplementedError
+
+    def refresh_multipart_upload_urls(
+        self,
+        key: str,
+        upload_id: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
+        raise NotImplementedError
+
+    def complete_multipart_upload(
+        self,
+        key: str,
+        upload_id: str,
+        parts: list[CompletedUploadPart],
+    ) -> None:
+        raise NotImplementedError
+
+    def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        raise NotImplementedError
+
+    def object_exists(self, key: str) -> bool:
+        raise NotImplementedError
+
+    def get_object_metadata(self, key: str) -> ObjectMetadata | None:
+        raise NotImplementedError
 
     def upload_bytes(
         self,
@@ -41,6 +77,27 @@ class RecordingStorage:
                 "cache_control": cache_control,
             }
         )
+
+    def upload_file(
+        self,
+        local_path: str,
+        key: str,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    def download_file(self, key: str, local_path: str) -> None:
+        raise NotImplementedError
+
+    def delete_object(self, key: str) -> None:
+        raise NotImplementedError
+
+    def generate_presigned_download_url(self, key: str) -> str:
+        raise NotImplementedError
+
+    def generate_playback_url(self, key: str) -> str:
+        raise NotImplementedError
 
 
 def test_process_encoding_message_acks_success(db_session):
@@ -81,7 +138,7 @@ def test_process_encoding_message_generates_master_playlist_on_final_rendition(
     db_session.commit()
 
     class FinalProcessor:
-        def process(self, _job):
+        def process(self, context):
             return EncodingProcessorResult(
                 output_path=(
                     f"hls/{video.id}/{final_job.rendition.resolution}/index.m3u8"

@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import pytest
 
 from core.encoding import VideoSourceMetadata
 from core.models.enums import ProcessingStatus
+from core.models.rendition import Rendition
 from core.services.job_service import (
     EncodingJobMessageMismatchError,
     claim_encoding_job,
@@ -11,11 +14,56 @@ from core.services.job_service import (
     mark_encoding_job_succeeded,
 )
 from core.services.video_service import ingest_video
+from core.storage.s3 import CompletedUploadPart, MultipartUploadSession, ObjectMetadata
 
 
 class RecordingStorage:
+    bucket = "test-bucket"
+
     def __init__(self):
         self.uploads = []
+
+    def create_multipart_upload(
+        self,
+        key: str,
+        content_type: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
+        raise NotImplementedError
+
+    def refresh_multipart_upload_urls(
+        self,
+        key: str,
+        upload_id: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
+        raise NotImplementedError
+
+    def complete_multipart_upload(
+        self,
+        key: str,
+        upload_id: str,
+        parts: list[CompletedUploadPart],
+    ) -> None:
+        raise NotImplementedError
+
+    def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        raise NotImplementedError
+
+    def object_exists(self, key: str) -> bool:
+        raise NotImplementedError
+
+    def get_object_metadata(self, key: str) -> ObjectMetadata | None:
+        raise NotImplementedError
+
+    def upload_file(
+        self,
+        local_path: str,
+        key: str,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None:
+        raise NotImplementedError
 
     def upload_bytes(
         self,
@@ -32,6 +80,18 @@ class RecordingStorage:
                 "cache_control": cache_control,
             }
         )
+
+    def download_file(self, key: str, local_path: str) -> None:
+        raise NotImplementedError
+
+    def delete_object(self, key: str) -> None:
+        raise NotImplementedError
+
+    def generate_presigned_download_url(self, key: str) -> str:
+        raise NotImplementedError
+
+    def generate_playback_url(self, key: str) -> str:
+        raise NotImplementedError
 
 
 class FailingStorage(RecordingStorage):
@@ -407,43 +467,42 @@ def test_all_skipped_renditions_do_not_create_playback_path(db_session):
 
 
 def test_derive_video_status_from_renditions():
-    class RenditionStatus:
-        def __init__(self, status):
-            self.status = status
+    def renditions_with_statuses(*statuses: ProcessingStatus) -> list[Rendition]:
+        return [Rendition(status=status) for status in statuses]
 
     assert (
         derive_video_status(
-            [
-                RenditionStatus(ProcessingStatus.done),
-                RenditionStatus(ProcessingStatus.done),
-            ]
+            renditions_with_statuses(
+                ProcessingStatus.done,
+                ProcessingStatus.done,
+            )
         )
         == ProcessingStatus.done
     )
     assert (
         derive_video_status(
-            [
-                RenditionStatus(ProcessingStatus.done),
-                RenditionStatus(ProcessingStatus.failed),
-            ]
+            renditions_with_statuses(
+                ProcessingStatus.done,
+                ProcessingStatus.failed,
+            )
         )
         == ProcessingStatus.partial
     )
     assert (
         derive_video_status(
-            [
-                RenditionStatus(ProcessingStatus.pending),
-                RenditionStatus(ProcessingStatus.failed),
-            ]
+            renditions_with_statuses(
+                ProcessingStatus.pending,
+                ProcessingStatus.failed,
+            )
         )
         == ProcessingStatus.failed
     )
     assert (
         derive_video_status(
-            [
-                RenditionStatus(ProcessingStatus.done),
-                RenditionStatus(ProcessingStatus.skipped),
-            ]
+            renditions_with_statuses(
+                ProcessingStatus.done,
+                ProcessingStatus.skipped,
+            )
         )
         == ProcessingStatus.done
     )

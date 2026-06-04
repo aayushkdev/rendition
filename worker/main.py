@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pika
+from pika import exceptions as pika_exceptions
 from pydantic import ValidationError
 
 from core.config import settings
@@ -42,7 +43,7 @@ def connect_with_retry() -> pika.BlockingConnection:
     for attempt in range(1, settings.RABBITMQ_CONNECT_RETRY_COUNT + 1):
         try:
             return pika.BlockingConnection(parameters)
-        except pika.exceptions.AMQPConnectionError as exc:
+        except pika_exceptions.AMQPConnectionError as exc:
             last_error = exc
             sleep_seconds = min(attempt, 10)
             logger.warning(

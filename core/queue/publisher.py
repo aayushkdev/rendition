@@ -1,8 +1,11 @@
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
-from typing import Protocol
+from typing import Protocol, TYPE_CHECKING
 
 import pika
+
+if TYPE_CHECKING:
+    from pika.adapters.blocking_connection import BlockingChannel
 
 from core.config import settings
 from core.queue.messages import (
@@ -56,7 +59,7 @@ class RabbitMQJobQueuePublisher:
 
 
 class RabbitMQJobQueueSession:
-    def __init__(self, channel: pika.adapters.blocking_connection.BlockingChannel):
+    def __init__(self, channel: "BlockingChannel"):
         self._channel = channel
 
     @contextmanager
@@ -82,7 +85,7 @@ class RabbitMQJobQueueSession:
 
 
 def setup_encoding_topology(
-    channel: pika.adapters.blocking_connection.BlockingChannel,
+    channel: "BlockingChannel",
     queue_name: str,
 ) -> None:
     channel.exchange_declare(

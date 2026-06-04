@@ -1,4 +1,7 @@
+from typing import Any
+
 import pytest
+from pika.adapters.blocking_connection import BlockingChannel
 
 from core.queue.messages import (
     ENCODING_EXCHANGE,
@@ -12,21 +15,20 @@ from core.queue.publisher import (
     setup_encoding_topology,
 )
 
-
-class FakeChannel:
+class FakeChannel(BlockingChannel):
     def __init__(self):
         self.calls = []
 
-    def exchange_declare(self, **kwargs):
+    def exchange_declare(self, *args, **kwargs) -> Any:
         self.calls.append(("exchange_declare", kwargs))
 
-    def queue_declare(self, **kwargs):
+    def queue_declare(self, *args, **kwargs) -> Any:
         self.calls.append(("queue_declare", kwargs))
 
-    def queue_bind(self, **kwargs):
+    def queue_bind(self, *args, **kwargs) -> Any:
         self.calls.append(("queue_bind", kwargs))
 
-    def basic_publish(self, **kwargs):
+    def basic_publish(self, *args, **kwargs) -> Any:
         self.calls.append(("basic_publish", kwargs))
 
 

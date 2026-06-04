@@ -1,9 +1,13 @@
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
+from core.encoding.ffmpeg import HlsEncoder
+from core.encoding.probe import VideoProber
 from core.encoding import VideoSourceMetadata
 from core.services.job_service import EncodingJobContext
+from core.storage.s3 import CompletedUploadPart, MultipartUploadSession, ObjectMetadata
 from worker.processor import FfmpegEncodingProcessor
 
 VIDEO_ID = UUID("11111111-1111-1111-1111-111111111111")
@@ -22,6 +26,39 @@ class RecordingStorage:
         self.downloads.append({"key": key, "local_path": local_path})
         with open(local_path, "wb") as file:
             file.write(b"input")
+
+    def create_multipart_upload(
+        self,
+        key: str,
+        content_type: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
+        raise NotImplementedError
+
+    def refresh_multipart_upload_urls(
+        self,
+        key: str,
+        upload_id: str,
+        part_count: int,
+    ) -> MultipartUploadSession:
+        raise NotImplementedError
+
+    def complete_multipart_upload(
+        self,
+        key: str,
+        upload_id: str,
+        parts: list[CompletedUploadPart],
+    ) -> None:
+        raise NotImplementedError
+
+    def abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        raise NotImplementedError
+
+    def object_exists(self, key: str) -> bool:
+        raise NotImplementedError
+
+    def get_object_metadata(self, key: str) -> ObjectMetadata | None:
+        raise NotImplementedError
 
     def upload_file(
         self,
@@ -42,13 +79,31 @@ class RecordingStorage:
             }
         )
 
+    def upload_bytes(
+        self,
+        key: str,
+        body: bytes,
+        content_type: str,
+        cache_control: str | None = None,
+    ) -> None:
+        raise NotImplementedError
 
-class FakeHlsEncoder:
+    def delete_object(self, key: str) -> None:
+        raise NotImplementedError
+
+    def generate_presigned_download_url(self, key: str) -> str:
+        raise NotImplementedError
+
+    def generate_playback_url(self, key: str) -> str:
+        raise NotImplementedError
+
+
+class FakeHlsEncoder(HlsEncoder):
     def __init__(self, create_segments: bool = True):
         self.create_segments = create_segments
         self.calls = []
 
-    def encode(self, input_path, output_dir, resolution: str) -> None:
+    def encode(self, input_path: Path, output_dir: Path, resolution: str) -> None:
         self.calls.append(
             {
                 "input_path": input_path,
@@ -63,7 +118,7 @@ class FakeHlsEncoder:
             (output_dir / "segments" / "segment_00001.ts").write_bytes(b"segment-1")
 
 
-class FakeVideoProber:
+class FakeVideoProber(VideoProber):
     def __init__(
         self,
         metadata: VideoSourceMetadata = VideoSourceMetadata(
@@ -76,7 +131,7 @@ class FakeVideoProber:
         self.metadata = metadata
         self.calls = []
 
-    def probe(self, input_path):
+    def probe(self, input_path: Path) -> VideoSourceMetadata:
         self.calls.append(input_path)
         return self.metadata
 

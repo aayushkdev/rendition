@@ -2,6 +2,7 @@ from contextlib import contextmanager
 
 import pytest
 import pika
+from pika import exceptions as pika_exceptions
 
 from core.queue.messages import EncodingJobMessage
 from core.services.video_service import ingest_video
@@ -30,14 +31,14 @@ class DeliveryMethod:
 
 
 class SuccessfulProcessor:
-    def process(self, _context):
+    def process(self, context):
         return EncodingProcessorResult(
             output_path="renditions/video/1080p/master.m3u8",
         )
 
 
 class FailingProcessor:
-    def process(self, _context):
+    def process(self, context):
         raise RuntimeError("ffmpeg failed")
 
 
@@ -157,7 +158,7 @@ def test_connect_with_retry_returns_after_transient_failures(monkeypatch):
     def blocking_connection(_parameters):
         attempts.append("attempt")
         if len(attempts) < 3:
-            raise pika.exceptions.AMQPConnectionError("rabbitmq unavailable")
+            raise pika_exceptions.AMQPConnectionError("rabbitmq unavailable")
         return connection
 
     sleeps = []
@@ -177,7 +178,7 @@ def test_connect_with_retry_fails_after_max_attempts(monkeypatch):
 
     def blocking_connection(_parameters):
         attempts.append("attempt")
-        raise pika.exceptions.AMQPConnectionError("rabbitmq unavailable")
+        raise pika_exceptions.AMQPConnectionError("rabbitmq unavailable")
 
     sleeps = []
     monkeypatch.setattr("worker.main.pika.BlockingConnection", blocking_connection)
