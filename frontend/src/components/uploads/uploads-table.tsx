@@ -1,4 +1,15 @@
-import { Copy, FileVideo, MoreHorizontal, Play, RotateCcw, Trash2, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  FileVideo,
+  MoreHorizontal,
+  Play,
+  RotateCcw,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/animate-ui/components/buttons/button";
@@ -50,6 +61,15 @@ export function UploadsTable({
   onCancelUpload,
   onRetryUpload,
 }: UploadsTableProps) {
+  const pageSize = 8;
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(videos.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedVideos = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return videos.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, videos]);
+
   return (
     <section className="rounded-lg border border-border bg-card shadow-sm">
       <div className="flex flex-col justify-between gap-4 border-b border-border p-4 md:flex-row md:items-center">
@@ -113,7 +133,7 @@ export function UploadsTable({
                 </tr>
               ))
             ) : (
-              videos.map((video) => (
+              paginatedVideos.map((video) => (
               <tr key={video.id} className="group">
                 <td className="border-b border-border px-4 py-4">
                   <div className="flex items-center gap-3">
@@ -189,10 +209,10 @@ export function UploadsTable({
                           <MoreHorizontal className="size-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                        <DropdownMenuContent align="end">
                         <DropdownMenuItem
                           onSelect={() =>
-                            toast.info("Opening video", {
+                            toast.info("Playback view not wired yet", {
                               description: video.title,
                             })
                           }
@@ -202,9 +222,22 @@ export function UploadsTable({
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={() =>
-                            toast.success("Link copied", {
-                              description: video.title,
-                            })
+                            video.videoId
+                              ? navigator.clipboard
+                                  .writeText(`/videos/${video.videoId}`)
+                                  .then(() =>
+                                    toast.success("Link copied", {
+                                      description: video.title,
+                                    }),
+                                  )
+                                  .catch(() =>
+                                    toast.error("Unable to copy link", {
+                                      description: video.title,
+                                    }),
+                                  )
+                              : toast.info("Video link unavailable", {
+                                  description: video.title,
+                                })
                           }
                         >
                           <Copy className="size-4" />
@@ -231,6 +264,36 @@ export function UploadsTable({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted-foreground">
+        <p>
+          Page {currentPage} of {totalPages}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+            disabled={currentPage === 1}
+          >
+            <ChevronLeft className="size-4" />
+            Previous
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setPage((current) => Math.min(totalPages, current + 1))
+            }
+            disabled={currentPage === totalPages}
+          >
+            Next
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
       </div>
     </section>
   );

@@ -98,6 +98,16 @@ export function UploadDashboard() {
     void loadVideos();
   }, []);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void loadVideos();
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   async function loadUploadConfig() {
     try {
       setUploadConfig(await getUploadConfig());
@@ -178,7 +188,11 @@ export function UploadDashboard() {
   function updateUploadRow(snapshot: MultipartUploadSnapshot) {
     if (!snapshot.row.canCancel && !snapshot.row.canRetry) {
       uploadControllersRef.current.delete(snapshot.row.id);
+      setUploadRows((current) =>
+        current.filter((row) => row.id !== snapshot.row.id),
+      );
       void loadVideos();
+      return;
     }
 
     setUploadRows((current) =>

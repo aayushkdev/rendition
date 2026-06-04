@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Maximize,
   Play,
@@ -21,30 +23,108 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/animate-ui/components/radix/tooltip";
-import { feedVideos } from "./data";
+import { listVideos, type VideoListItem } from "@/components/uploads/api";
+
 import { UpNextList } from "./up-next-list";
 import type { FeedVideo } from "./types";
 import { VideoCard } from "./video-card";
 import { VideoGridSkeleton } from "./video-feed-skeleton";
 import { VideoSurface } from "./video-surface";
 
+const PAGE_SIZE = 8;
+const VIDEO_PALETTES = [
+  "bg-[linear-gradient(135deg,#10241f,#2a6f62_46%,#d6b65b)]",
+  "bg-[linear-gradient(135deg,#101827,#245b87_48%,#9ed6d0)]",
+  "bg-[linear-gradient(135deg,#261513,#985b31_48%,#e3c06f)]",
+  "bg-[linear-gradient(135deg,#1c1830,#496c62_50%,#d77d4d)]",
+  "bg-[linear-gradient(135deg,#17221b,#647148_50%,#e1d0a1)]",
+  "bg-[linear-gradient(135deg,#202020,#67523a_50%,#c5aa74)]",
+  "bg-[linear-gradient(135deg,#14201f,#2f7771_48%,#b7d7c9)]",
+  "bg-[linear-gradient(135deg,#241814,#8f4f32_48%,#e7a85f)]",
+];
+
+function formatUploadedAt(value: string | null) {
+  if (!value) return "Uploaded";
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function paletteForVideo(videoId: string) {
+  const total = Array.from(videoId).reduce(
+    (sum, character) => sum + character.charCodeAt(0),
+    0,
+  );
+
+  return VIDEO_PALETTES[total % VIDEO_PALETTES.length];
+}
+
+function toFeedVideo(video: VideoListItem): FeedVideo {
+  return {
+    id: video.video_id,
+    title: video.title,
+    owner: "Rendition",
+    uploadedAt: formatUploadedAt(video.uploaded_at ?? video.created_at),
+    duration: "Ready",
+    quality: "HLS",
+    views: "Playable",
+    palette: paletteForVideo(video.video_id),
+  };
+}
+
 export function VideoFeed() {
   const [selectedVideo, setSelectedVideo] = useState<FeedVideo | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [videos, setVideos] = useState<FeedVideo[]>([]);
+  const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
   const sideVideos = useMemo(
     () =>
       selectedVideo
-        ? feedVideos.filter((video) => video.id !== selectedVideo.id)
-        : feedVideos.slice(1),
-    [selectedVideo],
+        ? videos.filter((video) => video.id !== selectedVideo.id)
+        : videos.slice(1),
+    [selectedVideo, videos],
   );
+  const canGoNext = videos.length === PAGE_SIZE;
+
+  const loadVideos = useCallback(async (nextPage: number, showToast = false) => {
+    setIsLoading(true);
+
+    try {
+      const response = await listVideos({
+        page: nextPage,
+        pageSize: PAGE_SIZE,
+        status: "done",
+      });
+
+      setVideos(response.map(toFeedVideo));
+      setSelectedVideo(null);
+
+      if (showToast) {
+        toast.info("Feed refreshed");
+      }
+    } catch (error) {
+      toast.error("Videos unavailable", {
+        description:
+          error instanceof Error ? error.message : "Unable to load videos",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadVideos(page);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [loadVideos, page]);
 
   function refreshFeed() {
-    setIsLoading(true);
-    window.setTimeout(() => {
-      setIsLoading(false);
-      toast.info("Feed refreshed");
-    }, 700);
+    void loadVideos(page, true);
   }
 
   return (
@@ -156,12 +236,12 @@ export function VideoFeed() {
 
             <UpNextList videos={sideVideos} onSelect={setSelectedVideo} />
           </section>
-        ) : (
-          isLoading ? (
-            <VideoGridSkeleton />
-          ) : (
+        ) : isLoading ? (
+          <VideoGridSkeleton />
+        ) : videos.length > 0 ? (
+          <>
             <section className="grid gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {feedVideos.map((video) => (
+              {videos.map((video) => (
                 <VideoCard
                   key={video.id}
                   video={video}
@@ -169,7 +249,50 @@ export function VideoFeed() {
                 />
               ))}
             </section>
-          )
+
+            <div className="flex items-center justify-between border-t border-border pt-4 text-sm text-muted-foreground">
+              <p>Page {page}</p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={page === 1 || isLoading}
+                >
+                  <ChevronLeft className="size-4" />
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((current) => current + 1)}
+                  disabled={!canGoNext || isLoading}
+                >
+                  Next
+                  <ChevronRight className="size-4" />
+                </Button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <section className="grid min-h-80 place-items-center border-y border-border py-12 text-center">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-normal">
+                No completed videos yet
+              </h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Finished transcodes will appear here.
+              </p>
+              <Button type="button" className="mt-5" asChild>
+                <Link href="/dashboard">
+                  <Plus className="size-4" />
+                  Upload
+                </Link>
+              </Button>
+            </div>
+          </section>
         )}
       </div>
     </main>

@@ -110,8 +110,27 @@ export function getUploadConfig() {
   return requestJson<UploadConfigResponse>("/videos/upload/config");
 }
 
-export function listVideos() {
-  return requestJson<VideoListItem[]>("/videos");
+export function listVideos(options?: {
+  page?: number;
+  pageSize?: number;
+  status?: VideoState["status"];
+}) {
+  const params = new URLSearchParams();
+
+  if (options?.page !== undefined) {
+    params.set("page", String(options.page));
+  }
+
+  if (options?.pageSize !== undefined) {
+    params.set("page_size", String(options.pageSize));
+  }
+
+  if (options?.status !== undefined) {
+    params.set("status", options.status);
+  }
+
+  const query = params.toString();
+  return requestJson<VideoListItem[]>(`/videos${query ? `?${query}` : ""}`);
 }
 
 export function refreshVideoUpload(videoId: string, partCount: number) {
