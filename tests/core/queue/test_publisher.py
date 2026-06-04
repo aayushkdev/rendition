@@ -1,4 +1,5 @@
 import pytest
+from uuid import UUID
 
 from core.queue.messages import (
     ENCODING_EXCHANGE,
@@ -81,9 +82,9 @@ def test_rabbitmq_queue_session_publishes_persistent_json_message():
     channel = FakeBlockingChannel()
     session = RabbitMQJobQueueSession(channel)
     message = EncodingJobMessage(
-        job_id="11111111-1111-1111-1111-111111111111",
-        video_id="22222222-2222-2222-2222-222222222222",
-        rendition_id="33333333-3333-3333-3333-333333333333",
+        job_id=UUID("11111111-1111-1111-1111-111111111111"),
+        video_id=UUID("22222222-2222-2222-2222-222222222222"),
+        rendition_id=UUID("33333333-3333-3333-3333-333333333333"),
     )
 
     session.publish_encoding_job(

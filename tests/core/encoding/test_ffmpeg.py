@@ -1,4 +1,5 @@
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -173,7 +174,7 @@ def test_build_hls_ffmpeg_command_contains_expected_hls_options():
 
 def test_build_hls_master_playlist_lists_completed_renditions():
     playlist = build_hls_master_playlist(
-        video_id="11111111-1111-1111-1111-111111111111",
+        video_id=UUID("11111111-1111-1111-1111-111111111111"),
         renditions=[
             MasterPlaylistRendition(
                 resolution="720p",

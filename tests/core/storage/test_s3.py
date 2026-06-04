@@ -7,15 +7,17 @@ from tests.fakes import FakeS3Client
 
 def make_storage():
     storage = S3ObjectStorage.__new__(S3ObjectStorage)
+    client = FakeS3Client()
+    presign_client = FakeS3Client()
     storage._bucket = "rendition"
     storage._expires_in = 3600
-    storage._client = FakeS3Client()
-    storage._presign_client = FakeS3Client()
-    return storage
+    storage._client = client
+    storage._presign_client = presign_client
+    return storage, client, presign_client
 
 
 def test_create_multipart_upload_returns_presigned_part_urls():
-    storage = make_storage()
+    storage, client, _presign_client = make_storage()
 
     session = storage.create_multipart_upload(
         key="source/video/input.mp4",
@@ -27,7 +29,7 @@ def test_create_multipart_upload_returns_presigned_part_urls():
     assert session.key == "source/video/input.mp4"
     assert session.upload_id == "upload-123"
     assert [part.part_number for part in session.parts] == [1, 2]
-    assert storage._client.calls[0] == (
+    assert client.calls[0] == (
         "create_multipart_upload",
         {
             "Bucket": "rendition",
@@ -38,8 +40,8 @@ def test_create_multipart_upload_returns_presigned_part_urls():
 
 
 def test_refresh_multipart_upload_wraps_presign_failures():
-    storage = make_storage()
-    storage._presign_client.fail_presign = True
+    storage, _client, presign_client = make_storage()
+    presign_client.fail_presign = True
 
     with pytest.raises(ObjectStorageError, match="failed to create upload URLs"):
         storage.refresh_multipart_upload_urls(
@@ -50,7 +52,7 @@ def test_refresh_multipart_upload_wraps_presign_failures():
 
 
 def test_complete_multipart_upload_sorts_parts():
-    storage = make_storage()
+    storage, client, _presign_client = make_storage()
 
     storage.complete_multipart_upload(
         key="source/video/input.mp4",
@@ -67,7 +69,7 @@ def test_complete_multipart_upload_sorts_parts():
         ],
     )
 
-    assert storage._client.calls == [
+    assert client.calls == [
         (
             "complete_multipart_upload",
             {
@@ -92,11 +94,11 @@ def test_complete_multipart_upload_sorts_parts():
 
 
 def test_abort_multipart_upload_calls_s3():
-    storage = make_storage()
+    storage, client, _presign_client = make_storage()
 
     storage.abort_multipart_upload("source/video/input.mp4", "upload-123")
 
-    assert storage._client.calls == [
+    assert client.calls == [
         (
             "abort_multipart_upload",
             {
@@ -109,7 +111,7 @@ def test_abort_multipart_upload_calls_s3():
 
 
 def test_upload_and_download_object_helpers_call_s3():
-    storage = make_storage()
+    storage, client, _presign_client = make_storage()
 
     storage.upload_file(
         "/tmp/input.mp4",
@@ -125,7 +127,7 @@ def test_upload_and_download_object_helpers_call_s3():
     )
     storage.download_file("source/video/input.mp4", "/tmp/input.mp4")
 
-    assert storage._client.calls == [
+    assert client.calls == [
         (
             "upload_file",
             {
@@ -160,11 +162,11 @@ def test_upload_and_download_object_helpers_call_s3():
 
 
 def test_delete_object_calls_s3():
-    storage = make_storage()
+    storage, client, _presign_client = make_storage()
 
     storage.delete_object("source/video/input.mp4")
 
-    assert storage._client.calls == [
+    assert client.calls == [
         (
             "delete_object",
             {
@@ -176,12 +178,12 @@ def test_delete_object_calls_s3():
 
 
 def test_playback_url_uses_presigned_download_url():
-    storage = make_storage()
+    storage, _client, presign_client = make_storage()
 
     url = storage.generate_playback_url("hls/video/master.m3u8")
 
     assert url == "http://storage.test/get_object/hls/video/master.m3u8"
-    assert storage._presign_client.calls == [
+    assert presign_client.calls == [
         (
             "generate_presigned_url",
             {
@@ -194,7 +196,7 @@ def test_playback_url_uses_presigned_download_url():
 
 
 def test_get_object_metadata_returns_head_object_metadata():
-    storage = make_storage()
+    storage, _client, _presign_client = make_storage()
 
     metadata = storage.get_object_metadata("source/video/input.mp4")
 
@@ -204,8 +206,8 @@ def test_get_object_metadata_returns_head_object_metadata():
 
 
 def test_create_multipart_upload_wraps_boto_failures():
-    storage = make_storage()
-    storage._client.fail_operations.add("create_multipart_upload")
+    storage, client, _presign_client = make_storage()
+    client.fail_operations.add("create_multipart_upload")
 
     with pytest.raises(ObjectStorageError, match="failed to create multipart upload"):
         storage.create_multipart_upload(
@@ -216,8 +218,8 @@ def test_create_multipart_upload_wraps_boto_failures():
 
 
 def test_complete_multipart_upload_wraps_boto_failures():
-    storage = make_storage()
-    storage._client.fail_operations.add("complete_multipart_upload")
+    storage, client, _presign_client = make_storage()
+    client.fail_operations.add("complete_multipart_upload")
 
     with pytest.raises(ObjectStorageError, match="failed to complete multipart upload"):
         storage.complete_multipart_upload(
@@ -233,8 +235,8 @@ def test_complete_multipart_upload_wraps_boto_failures():
 
 
 def test_abort_multipart_upload_wraps_boto_failures():
-    storage = make_storage()
-    storage._client.fail_operations.add("abort_multipart_upload")
+    storage, client, _presign_client = make_storage()
+    client.fail_operations.add("abort_multipart_upload")
 
     with pytest.raises(ObjectStorageError, match="failed to abort multipart upload"):
         storage.abort_multipart_upload("source/video/input.mp4", "upload-123")
@@ -277,38 +279,38 @@ def test_abort_multipart_upload_wraps_boto_failures():
     ],
 )
 def test_object_transfer_helpers_wrap_boto_failures(operation, call, message):
-    storage = make_storage()
-    storage._client.fail_operations.add(operation)
+    storage, client, _presign_client = make_storage()
+    client.fail_operations.add(operation)
 
     with pytest.raises(ObjectStorageError, match=message):
         call(storage)
 
 
 def test_generate_presigned_download_url_wraps_boto_failures():
-    storage = make_storage()
-    storage._presign_client.fail_presign = True
+    storage, _client, presign_client = make_storage()
+    presign_client.fail_presign = True
 
     with pytest.raises(ObjectStorageError, match="failed to create download URL"):
         storage.generate_presigned_download_url("hls/video/master.m3u8")
 
 
 def test_get_object_metadata_returns_none_for_missing_objects():
-    storage = make_storage()
-    storage._client.raise_no_such_key = True
+    storage, client, _presign_client = make_storage()
+    client.raise_no_such_key = True
 
     assert storage.get_object_metadata("missing.mp4") is None
 
 
 def test_get_object_metadata_returns_none_for_404_client_error():
-    storage = make_storage()
-    storage._client.raise_404 = True
+    storage, client, _presign_client = make_storage()
+    client.raise_404 = True
 
     assert storage.get_object_metadata("missing.mp4") is None
 
 
 def test_get_object_metadata_wraps_boto_failures():
-    storage = make_storage()
-    storage._client.fail_operations.add("head_object")
+    storage, client, _presign_client = make_storage()
+    client.fail_operations.add("head_object")
 
     with pytest.raises(ObjectStorageError, match="failed to check object existence"):
         storage.get_object_metadata("source/video/input.mp4")

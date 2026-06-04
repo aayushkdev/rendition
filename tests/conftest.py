@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from typing import cast
 
 from api.main import app
 from core.db.base import Base
@@ -13,6 +14,11 @@ from core.storage import (
     get_object_storage,
 )
 from tests.fakes import FakeJobQueuePublisher, FakeObjectStorage
+
+
+class TestClientWithFakes(TestClient):
+    storage: FakeObjectStorage
+    publisher: FakeJobQueuePublisher
 
 
 @pytest.fixture()
@@ -47,8 +53,9 @@ def client(db_session):
     app.dependency_overrides[get_job_queue_publisher] = lambda: publisher
     try:
         with TestClient(app) as test_client:
-            test_client.storage = storage
-            test_client.publisher = publisher
-            yield test_client
+            typed_client = cast(TestClientWithFakes, test_client)
+            typed_client.storage = storage
+            typed_client.publisher = publisher
+            yield typed_client
     finally:
         app.dependency_overrides.clear()
