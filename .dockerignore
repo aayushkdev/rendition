@@ -1,0 +1,13 @@
+**
+
+!pyproject.toml
+!uv.lock
+!alembic.ini
+!alembic/
+!alembic/**
+!api/
+!api/**
+!core/
+!core/**
+!worker/
+!worker/**

@@ -53,6 +53,7 @@ services:
           "CMD",
           "uv",
           "run",
+          "--no-dev",
           "python",
           "-c",
           "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=2)",
@@ -96,6 +97,7 @@ services:
           "CMD",
           "uv",
           "run",
+          "--no-dev",
           "python",
           "-c",
           "import os, pika; c = pika.BlockingConnection(pika.URLParameters(os.environ['RABBITMQ_URL'])); c.close()",
@@ -110,7 +112,7 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
-    command: ["uv", "run", "python", "-m", "worker.outbox"]
+    command: ["uv", "run", "--no-dev", "python", "-m", "worker.outbox"]
     depends_on:
       postgres:
         condition: service_healthy

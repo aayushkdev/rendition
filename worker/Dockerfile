@@ -19,4 +19,4 @@ RUN uv sync --frozen --no-dev
 COPY core ./core
 COPY worker ./worker
 
-CMD ["uv", "run", "python", "-m", "worker.main"]
+CMD ["uv", "run", "--no-dev", "python", "-m", "worker.main"]

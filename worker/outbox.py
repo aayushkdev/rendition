@@ -4,6 +4,7 @@ import time
 
 from core.config import settings
 from core.db.session import SessionLocal
+from core.models import job, outbox, rendition, upload_session, video  # noqa: F401
 from core.queue import get_job_queue_publisher
 from core.services.outbox_service import publish_pending_outbox_messages
 
