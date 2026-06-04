@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from core.config import settings
 from core.db.session import SessionLocal
+from core.models import job, outbox, rendition, upload_session, video  # noqa: F401
 from core.queue.messages import EncodingJobMessage
 from core.queue.publisher import setup_encoding_topology
 from worker.processor import (
