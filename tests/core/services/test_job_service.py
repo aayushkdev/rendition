@@ -14,95 +14,7 @@ from core.services.job_service import (
     mark_encoding_job_succeeded,
 )
 from core.services.video_service import ingest_video
-from core.storage.s3 import CompletedUploadPart, MultipartUploadSession, ObjectMetadata
-
-
-class RecordingStorage:
-    bucket = "test-bucket"
-
-    def __init__(self):
-        self.uploads = []
-
-    def create_multipart_upload(
-        self,
-        key: str,
-        content_type: str,
-        part_count: int,
-    ) -> MultipartUploadSession:
-        raise NotImplementedError
-
-    def refresh_multipart_upload_urls(
-        self,
-        key: str,
-        upload_id: str,
-        part_count: int,
-    ) -> MultipartUploadSession:
-        raise NotImplementedError
-
-    def complete_multipart_upload(
-        self,
-        key: str,
-        upload_id: str,
-        parts: list[CompletedUploadPart],
-    ) -> None:
-        raise NotImplementedError
-
-    def abort_multipart_upload(self, key: str, upload_id: str) -> None:
-        raise NotImplementedError
-
-    def object_exists(self, key: str) -> bool:
-        raise NotImplementedError
-
-    def get_object_metadata(self, key: str) -> ObjectMetadata | None:
-        raise NotImplementedError
-
-    def upload_file(
-        self,
-        local_path: str,
-        key: str,
-        content_type: str,
-        cache_control: str | None = None,
-    ) -> None:
-        raise NotImplementedError
-
-    def upload_bytes(
-        self,
-        key: str,
-        body: bytes,
-        content_type: str,
-        cache_control: str | None = None,
-    ) -> None:
-        self.uploads.append(
-            {
-                "key": key,
-                "body": body,
-                "content_type": content_type,
-                "cache_control": cache_control,
-            }
-        )
-
-    def download_file(self, key: str, local_path: str) -> None:
-        raise NotImplementedError
-
-    def delete_object(self, key: str) -> None:
-        raise NotImplementedError
-
-    def generate_presigned_download_url(self, key: str) -> str:
-        raise NotImplementedError
-
-    def generate_playback_url(self, key: str) -> str:
-        raise NotImplementedError
-
-
-class FailingStorage(RecordingStorage):
-    def upload_bytes(
-        self,
-        key: str,
-        body: bytes,
-        content_type: str,
-        cache_control: str | None = None,
-    ) -> None:
-        raise RuntimeError("storage upload failed")
+from tests.fakes import FakeObjectStorage
 
 
 def test_claim_encoding_job_marks_job_running(db_session):
@@ -301,7 +213,7 @@ def test_failed_rendition_keeps_completed_renditions_partially_available(db_sess
 
 
 def test_terminal_success_generates_master_playlist(db_session):
-    storage = RecordingStorage()
+    storage = FakeObjectStorage()
     video = ingest_video(db_session, "s3://input/video.mp4")
 
     for rendition in video.renditions:
@@ -321,15 +233,18 @@ def test_terminal_success_generates_master_playlist(db_session):
     db_session.refresh(video)
     assert video.status == ProcessingStatus.done
     assert video.playback_path == f"hls/{video.id}/master.m3u8"
-    assert len(storage.uploads) == 1
-    assert storage.uploads[0]["key"] == f"hls/{video.id}/master.m3u8"
-    assert storage.uploads[0]["content_type"] == "application/vnd.apple.mpegurl"
-    assert b"#EXTM3U\n" in storage.uploads[0]["body"]
-    assert b"1080p/index.m3u8\n" in storage.uploads[0]["body"]
+    assert len(storage.uploaded_bytes) == 1
+    assert storage.uploaded_bytes[0]["key"] == f"hls/{video.id}/master.m3u8"
+    assert (
+        storage.uploaded_bytes[0]["content_type"]
+        == "application/vnd.apple.mpegurl"
+    )
+    assert b"#EXTM3U\n" in storage.uploaded_bytes[0]["body"]
+    assert b"1080p/index.m3u8\n" in storage.uploaded_bytes[0]["body"]
 
 
 def test_master_playlist_is_not_generated_until_all_renditions_terminal(db_session):
-    storage = RecordingStorage()
+    storage = FakeObjectStorage()
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
     claim_encoding_job(db_session, job.id, job.video_id, job.rendition_id)
@@ -344,11 +259,12 @@ def test_master_playlist_is_not_generated_until_all_renditions_terminal(db_sessi
     db_session.refresh(video)
     assert video.status == ProcessingStatus.partial
     assert video.playback_path is None
-    assert storage.uploads == []
+    assert storage.uploaded_bytes == []
 
 
 def test_master_playlist_upload_failure_does_not_set_playback_path(db_session):
-    storage = FailingStorage()
+    storage = FakeObjectStorage()
+    storage.fail_upload_bytes = True
     video = ingest_video(db_session, "s3://input/video.mp4")
 
     for rendition in video.renditions[:-1]:
@@ -381,7 +297,7 @@ def test_master_playlist_upload_failure_does_not_set_playback_path(db_session):
 def test_terminal_partial_generates_master_playlist_for_successful_renditions(
     db_session,
 ):
-    storage = RecordingStorage()
+    storage = FakeObjectStorage()
     video = ingest_video(db_session, "s3://input/video.mp4")
     done_rendition = video.renditions[0]
     failing_rendition = video.renditions[1]
@@ -431,19 +347,19 @@ def test_terminal_partial_generates_master_playlist_for_successful_renditions(
     assert should_retry is False
     assert video.status == ProcessingStatus.partial
     assert video.playback_path == f"hls/{video.id}/master.m3u8"
-    assert len(storage.uploads) == 1
+    assert len(storage.uploaded_bytes) == 1
     assert (
         f"{done_rendition.resolution}/index.m3u8\n".encode()
-        in storage.uploads[0]["body"]
+        in storage.uploaded_bytes[0]["body"]
     )
     assert (
         f"{failing_rendition.resolution}/index.m3u8\n".encode()
-        not in storage.uploads[0]["body"]
+        not in storage.uploaded_bytes[0]["body"]
     )
 
 
 def test_all_skipped_renditions_do_not_create_playback_path(db_session):
-    storage = RecordingStorage()
+    storage = FakeObjectStorage()
     video = ingest_video(db_session, "s3://input/video.mp4")
 
     for rendition in video.renditions:
@@ -463,7 +379,7 @@ def test_all_skipped_renditions_do_not_create_playback_path(db_session):
     db_session.refresh(video)
     assert video.status == ProcessingStatus.failed
     assert video.playback_path is None
-    assert storage.uploads == []
+    assert storage.uploaded_bytes == []
 
 
 def test_derive_video_status_from_renditions():

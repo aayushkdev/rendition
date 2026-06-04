@@ -1,21 +1,10 @@
 from worker import outbox
-
-
-class FakeSession:
-    def __init__(self):
-        self.closed = False
-
-    def close(self):
-        self.closed = True
-
-
-class FakePublisher:
-    pass
+from tests.fakes import FakeClosableSession, FakeJobQueuePublisher
 
 
 def test_publish_once_uses_configured_batch_size_and_closes_session(monkeypatch):
-    session = FakeSession()
-    publisher = FakePublisher()
+    session = FakeClosableSession()
+    publisher = FakeJobQueuePublisher()
     calls = []
 
     monkeypatch.setattr(outbox, "SessionLocal", lambda: session)
@@ -40,10 +29,14 @@ def test_publish_once_uses_configured_batch_size_and_closes_session(monkeypatch)
 
 
 def test_publish_once_closes_session_when_publish_fails(monkeypatch):
-    session = FakeSession()
+    session = FakeClosableSession()
 
     monkeypatch.setattr(outbox, "SessionLocal", lambda: session)
-    monkeypatch.setattr(outbox, "get_job_queue_publisher", lambda: FakePublisher())
+    monkeypatch.setattr(
+        outbox,
+        "get_job_queue_publisher",
+        lambda: FakeJobQueuePublisher(),
+    )
 
     def publish_pending_outbox_messages(*_args, **_kwargs):
         raise RuntimeError("publish failed")

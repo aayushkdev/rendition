@@ -6,46 +6,14 @@ from pika import exceptions as pika_exceptions
 
 from core.queue.messages import EncodingJobMessage
 from core.services.video_service import ingest_video
+from tests.fakes import FakeDeliveryChannel, FakeDeliveryMethod, FakeEncodingProcessor
 from worker.main import connect_with_retry, handle_delivery
-from worker.processor import EncodingProcessorResult
-
-
-class RecordingChannel:
-    def __init__(self):
-        self.acks = []
-        self.nacks = []
-        self.rejects = []
-
-    def basic_ack(self, delivery_tag):
-        self.acks.append(delivery_tag)
-
-    def basic_nack(self, delivery_tag, requeue):
-        self.nacks.append({"delivery_tag": delivery_tag, "requeue": requeue})
-
-    def basic_reject(self, delivery_tag, requeue):
-        self.rejects.append({"delivery_tag": delivery_tag, "requeue": requeue})
-
-
-class DeliveryMethod:
-    delivery_tag = "delivery-1"
-
-
-class SuccessfulProcessor:
-    def process(self, context):
-        return EncodingProcessorResult(
-            output_path="renditions/video/1080p/master.m3u8",
-        )
-
-
-class FailingProcessor:
-    def process(self, context):
-        raise RuntimeError("ffmpeg failed")
 
 
 def test_handle_delivery_acks_success(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
-    channel = RecordingChannel()
+    channel = FakeDeliveryChannel()
 
     @contextmanager
     def session_scope():
@@ -53,7 +21,7 @@ def test_handle_delivery_acks_success(db_session):
 
     handle_delivery(
         channel=channel,
-        method=DeliveryMethod(),
+        method=FakeDeliveryMethod(),
         body=EncodingJobMessage(
             job_id=job.id,
             video_id=job.video_id,
@@ -62,7 +30,7 @@ def test_handle_delivery_acks_success(db_session):
         .model_dump_json()
         .encode("utf-8"),
         session_scope=session_scope,
-        processor=SuccessfulProcessor(),
+        processor=FakeEncodingProcessor(),
     )
 
     assert channel.acks == ["delivery-1"]
@@ -73,7 +41,7 @@ def test_handle_delivery_acks_success(db_session):
 def test_handle_delivery_nacks_retryable_failure(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
-    channel = RecordingChannel()
+    channel = FakeDeliveryChannel()
 
     @contextmanager
     def session_scope():
@@ -81,7 +49,7 @@ def test_handle_delivery_nacks_retryable_failure(db_session):
 
     handle_delivery(
         channel=channel,
-        method=DeliveryMethod(),
+        method=FakeDeliveryMethod(),
         body=EncodingJobMessage(
             job_id=job.id,
             video_id=job.video_id,
@@ -90,7 +58,7 @@ def test_handle_delivery_nacks_retryable_failure(db_session):
         .model_dump_json()
         .encode("utf-8"),
         session_scope=session_scope,
-        processor=FailingProcessor(),
+        processor=FakeEncodingProcessor(error=RuntimeError("ffmpeg failed")),
     )
 
     assert channel.acks == []
@@ -99,7 +67,7 @@ def test_handle_delivery_nacks_retryable_failure(db_session):
 
 
 def test_handle_delivery_rejects_invalid_json(db_session):
-    channel = RecordingChannel()
+    channel = FakeDeliveryChannel()
 
     @contextmanager
     def session_scope():
@@ -107,10 +75,10 @@ def test_handle_delivery_rejects_invalid_json(db_session):
 
     handle_delivery(
         channel=channel,
-        method=DeliveryMethod(),
+        method=FakeDeliveryMethod(),
         body=b"{",
         session_scope=session_scope,
-        processor=SuccessfulProcessor(),
+        processor=FakeEncodingProcessor(),
     )
 
     assert channel.acks == []
@@ -121,7 +89,7 @@ def test_handle_delivery_rejects_invalid_json(db_session):
 def test_handle_delivery_nacks_unexpected_processor_crash(db_session, monkeypatch):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
-    channel = RecordingChannel()
+    channel = FakeDeliveryChannel()
 
     @contextmanager
     def session_scope():
@@ -134,7 +102,7 @@ def test_handle_delivery_nacks_unexpected_processor_crash(db_session, monkeypatc
 
     handle_delivery(
         channel=channel,
-        method=DeliveryMethod(),
+        method=FakeDeliveryMethod(),
         body=EncodingJobMessage(
             job_id=job.id,
             video_id=job.video_id,
@@ -143,7 +111,7 @@ def test_handle_delivery_nacks_unexpected_processor_crash(db_session, monkeypatc
         .model_dump_json()
         .encode("utf-8"),
         session_scope=session_scope,
-        processor=SuccessfulProcessor(),
+        processor=FakeEncodingProcessor(),
     )
 
     assert channel.acks == []

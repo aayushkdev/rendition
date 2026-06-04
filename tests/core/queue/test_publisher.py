@@ -1,7 +1,4 @@
-from typing import Any
-
 import pytest
-from pika.adapters.blocking_connection import BlockingChannel
 
 from core.queue.messages import (
     ENCODING_EXCHANGE,
@@ -14,40 +11,11 @@ from core.queue.publisher import (
     RabbitMQJobQueueSession,
     setup_encoding_topology,
 )
-
-class FakeChannel(BlockingChannel):
-    def __init__(self):
-        self.calls = []
-
-    def exchange_declare(self, *args, **kwargs) -> Any:
-        self.calls.append(("exchange_declare", kwargs))
-
-    def queue_declare(self, *args, **kwargs) -> Any:
-        self.calls.append(("queue_declare", kwargs))
-
-    def queue_bind(self, *args, **kwargs) -> Any:
-        self.calls.append(("queue_bind", kwargs))
-
-    def basic_publish(self, *args, **kwargs) -> Any:
-        self.calls.append(("basic_publish", kwargs))
-
-
-class FakeConnection:
-    def __init__(self, channel):
-        self._channel = channel
-        self.is_open = True
-        self.closed = False
-
-    def channel(self):
-        return self._channel
-
-    def close(self):
-        self.closed = True
-        self.is_open = False
+from tests.fakes import FakeBlockingChannel, FakeBlockingConnection
 
 
 def test_setup_encoding_topology_declares_exchange_queue_and_binding():
-    channel = FakeChannel()
+    channel = FakeBlockingChannel()
 
     setup_encoding_topology(channel, queue_name="jobs.encode")
 
@@ -73,8 +41,8 @@ def test_setup_encoding_topology_declares_exchange_queue_and_binding():
 
 
 def test_rabbitmq_publisher_session_sets_up_topology_and_closes(monkeypatch):
-    channel = FakeChannel()
-    connection = FakeConnection(channel)
+    channel = FakeBlockingChannel()
+    connection = FakeBlockingConnection(channel)
 
     monkeypatch.setattr(
         "core.queue.publisher.pika.BlockingConnection",
@@ -110,7 +78,7 @@ def test_rabbitmq_publisher_session_wraps_connection_failures(monkeypatch):
 
 
 def test_rabbitmq_queue_session_publishes_persistent_json_message():
-    channel = FakeChannel()
+    channel = FakeBlockingChannel()
     session = RabbitMQJobQueueSession(channel)
     message = EncodingJobMessage(
         job_id="11111111-1111-1111-1111-111111111111",

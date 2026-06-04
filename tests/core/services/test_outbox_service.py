@@ -3,31 +3,7 @@ from core.models.enums import OutboxStatus
 from core.queue.messages import ENCODING_EXCHANGE, ENCODING_ROUTING_KEY
 from core.services.outbox_service import publish_pending_outbox_messages
 from core.services.video_service import ingest_video
-
-
-class RecordingPublisher:
-    def __init__(self, fail: bool = False, fail_session: bool = False):
-        self.fail = fail
-        self.fail_session = fail_session
-        self.messages = []
-        self.session_count = 0
-
-    def session(self):
-        self.session_count += 1
-        if self.fail_session:
-            raise RuntimeError("rabbitmq connection failed")
-        return self
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, _exc_type, _exc, _traceback):
-        return False
-
-    def publish_encoding_job(self, message, exchange: str, routing_key: str) -> None:
-        if self.fail:
-            raise RuntimeError("rabbitmq unavailable")
-        self.messages.append((message, exchange, routing_key))
+from tests.fakes import FakeOutboxMessagePublisher
 
 
 def test_publish_pending_outbox_messages_marks_rows_published(db_session):
@@ -47,7 +23,7 @@ def test_publish_pending_outbox_messages_marks_rows_published(db_session):
     db_session.add_all(outbox_messages)
     db_session.commit()
 
-    publisher = RecordingPublisher()
+    publisher = FakeOutboxMessagePublisher()
     published_count = publish_pending_outbox_messages(db_session, publisher)
 
     for outbox_message in outbox_messages:
@@ -79,7 +55,7 @@ def test_publish_pending_outbox_messages_keeps_failed_rows_pending(db_session):
 
     published_count = publish_pending_outbox_messages(
         db_session,
-        RecordingPublisher(fail=True),
+        FakeOutboxMessagePublisher(fail=True),
     )
 
     db_session.refresh(outbox_message)
@@ -107,7 +83,7 @@ def test_publish_pending_outbox_messages_can_publish_specific_rows(db_session):
     db_session.add_all(outbox_messages)
     db_session.commit()
 
-    publisher = RecordingPublisher()
+    publisher = FakeOutboxMessagePublisher()
     published_count = publish_pending_outbox_messages(
         db_session,
         publisher,
@@ -137,7 +113,7 @@ def test_publish_pending_outbox_messages_records_session_failures(db_session):
     db_session.add(outbox_message)
     db_session.commit()
 
-    publisher = RecordingPublisher(fail_session=True)
+    publisher = FakeOutboxMessagePublisher(fail_session=True)
     published_count = publish_pending_outbox_messages(db_session, publisher)
 
     db_session.refresh(outbox_message)
@@ -149,7 +125,7 @@ def test_publish_pending_outbox_messages_records_session_failures(db_session):
 
 
 def test_publish_pending_outbox_messages_skips_empty_batches(db_session):
-    publisher = RecordingPublisher()
+    publisher = FakeOutboxMessagePublisher()
 
     published_count = publish_pending_outbox_messages(db_session, publisher)
 
