@@ -24,10 +24,6 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -35,12 +31,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672/%2F
-      STORAGE_ENDPOINT: http://minio:9000
-      STORAGE_PRESIGN_ENDPOINT: ${STORAGE_PRESIGN_ENDPOINT:-http://localhost:9000}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:?STORAGE_ENDPOINT is required}
+      STORAGE_PRESIGN_ENDPOINT: ${STORAGE_PRESIGN_ENDPOINT:-${STORAGE_ENDPOINT:?STORAGE_ENDPOINT is required}}
       STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:?STORAGE_ACCESS_KEY_ID is required}
       STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:?STORAGE_SECRET_ACCESS_KEY is required}
       STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET is required}
-      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_REGION: ${STORAGE_REGION:?STORAGE_REGION is required}
       STORAGE_PRESIGNED_URL_EXPIRES_SECONDS: ${STORAGE_PRESIGNED_URL_EXPIRES_SECONDS:-21600}
       UPLOAD_MAX_SIZE_BYTES: ${UPLOAD_MAX_SIZE_BYTES:-5368709120}
       UPLOAD_MAX_PART_COUNT: ${UPLOAD_MAX_PART_COUNT:-10000}
@@ -48,7 +44,7 @@ services:
       UPLOAD_ALLOWED_CONTENT_TYPES: ${UPLOAD_ALLOWED_CONTENT_TYPES:-video/mp4,video/quicktime,video/x-matroska}
       WORKER_JOB_RETRY_COUNT: ${WORKER_JOB_RETRY_COUNT:-3}
       RABBITMQ_CONNECT_RETRY_COUNT: ${RABBITMQ_CONNECT_RETRY_COUNT:-30}
-      ENVIRONMENT: ${ENVIRONMENT:-local}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
     ports:
       - "8000:8000"
     healthcheck:
@@ -76,10 +72,6 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -87,17 +79,17 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}@rabbitmq:5672/%2F
-      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:?STORAGE_ENDPOINT is required}
       STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:?STORAGE_ACCESS_KEY_ID is required}
       STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:?STORAGE_SECRET_ACCESS_KEY is required}
       STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET is required}
-      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_REGION: ${STORAGE_REGION:?STORAGE_REGION is required}
       WORKER_JOB_RETRY_COUNT: ${WORKER_JOB_RETRY_COUNT:-3}
       WORKER_QUEUE_NAME: ${WORKER_QUEUE_NAME:-jobs.encode}
       WORKER_PREFETCH_COUNT: ${WORKER_PREFETCH_COUNT:-1}
       WORKER_TEMP_ROOT: ${WORKER_TEMP_ROOT:-/tmp/rendition}
       RABBITMQ_CONNECT_RETRY_COUNT: ${RABBITMQ_CONNECT_RETRY_COUNT:-30}
-      ENVIRONMENT: ${ENVIRONMENT:-local}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
     healthcheck:
       test:
         [
@@ -135,7 +127,7 @@ services:
       OUTBOX_PUBLISH_BATCH_SIZE: ${OUTBOX_PUBLISH_BATCH_SIZE:-100}
       OUTBOX_PUBLISH_INTERVAL_SECONDS: ${OUTBOX_PUBLISH_INTERVAL_SECONDS:-30}
       WORKER_QUEUE_NAME: ${WORKER_QUEUE_NAME:-jobs.encode}
-      ENVIRONMENT: ${ENVIRONMENT:-local}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
     restart: unless-stopped
 
   postgres:
@@ -172,42 +164,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY_ID:?STORAGE_ACCESS_KEY_ID is required}
-      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_ACCESS_KEY:?STORAGE_SECRET_ACCESS_KEY is required}
-      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-http://localhost:3000,http://localhost:3001,http://localhost:5173,http://localhost:8000}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:?STORAGE_ACCESS_KEY_ID is required}
-      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:?STORAGE_SECRET_ACCESS_KEY is required}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:?STORAGE_BUCKET is required}
-    entrypoint: ["/bin/sh", "-c"]
-    command: >
-      "mc alias set local http://minio:9000 $${STORAGE_ACCESS_KEY_ID} $${STORAGE_SECRET_ACCESS_KEY} &&
-      mc mb --ignore-existing local/$${STORAGE_BUCKET} &&
-      mc anonymous set none local/$${STORAGE_BUCKET}"
-    restart: "no"
-
 volumes:
   postgres-data:
   rabbitmq-data:
-  minio-data:

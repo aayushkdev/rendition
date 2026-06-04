@@ -54,7 +54,7 @@ flowchart LR
   RabbitMQ.
 - `postgres`: application database.
 - `rabbitmq`: job queue.
-- `minio`: local S3-compatible object storage.
+- `minio`: local S3-compatible object storage for development.
 - `minio-init`: creates the private local bucket.
 
 ## Upload And Encoding Flow
@@ -80,7 +80,7 @@ flowchart LR
     uploaded.
 14. `videos.playback_path` points at the master playlist.
 
-## Run Locally With MinIO
+## Local Development
 
 The local setup runs with:
 
@@ -123,54 +123,50 @@ Default local credentials from `.env.example`:
 ```text
 Postgres:  rendition / rendition
 RabbitMQ:  rendition / rendition
-MinIO:     rendition / rendition-secret
+Object storage: rendition / rendition-secret
 Bucket:    rendition
 ```
 
-## Upload Flow
+## Production Deployment
 
-1. Open the frontend.
-2. Drop or select a video.
-3. The API creates a multipart upload in MinIO.
-4. The browser uploads chunks directly to MinIO using presigned URLs.
-5. The API completes the multipart upload.
-6. Encoding jobs are queued.
-7. The worker downloads the source video, probes it, encodes HLS renditions, and
-   uploads the outputs.
-8. When the usable renditions are finished, the app creates:
+Use `docker-compose.prod.yml` when object storage is provided externally by AWS
+S3, Cloudflare R2, or another S3-compatible provider.
 
-```text
-hls/{video_id}/master.m3u8
+Create a production environment file with working database, RabbitMQ, and
+storage credentials, then start the stack with:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build
 ```
 
-
-## Use Your Own S3-Compatible Provider
-
-MinIO is only the local object storage. In production or remote testing, point
-the same storage layer at another S3-compatible provider such as AWS S3,
-Cloudflare R2, or another MinIO deployment.
-
-Set these values in `.env`:
+At minimum, the production environment should provide:
 
 ```text
-STORAGE_ENDPOINT=https://your-s3-api-endpoint
-STORAGE_PRESIGN_ENDPOINT=https://your-public-upload-endpoint
-STORAGE_ACCESS_KEY_ID=your-access-key
-STORAGE_SECRET_ACCESS_KEY=your-secret-key
-STORAGE_BUCKET=your-bucket
-STORAGE_REGION=auto-or-provider-region
+POSTGRES_HOST=...
+POSTGRES_PORT=5432
+POSTGRES_DB=...
+POSTGRES_USER=...
+POSTGRES_PASSWORD=...
+
+RABBITMQ_DEFAULT_USER=...
+RABBITMQ_DEFAULT_PASS=...
+
+STORAGE_ENDPOINT=...
+STORAGE_PRESIGN_ENDPOINT=...
+STORAGE_ACCESS_KEY_ID=...
+STORAGE_SECRET_ACCESS_KEY=...
+STORAGE_BUCKET=...
+STORAGE_REGION=...
 ```
 
-For AWS S3, `STORAGE_ENDPOINT` can be the normal AWS S3 endpoint for your
-region.
+Typical production flow:
 
-For Cloudflare R2, use the R2 S3 API endpoint:
+1. Create the object storage bucket ahead of time.
+2. Prepare the production environment file or exported environment variables.
+3. Start the stack with `docker compose -f docker-compose.prod.yml up --build -d`.
+4. Run database migrations with `uv run alembic upgrade head`.
+5. Verify the API health endpoint and frontend before sending traffic.
 
-```text
-STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-STORAGE_PRESIGN_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-STORAGE_REGION=auto
-```
-
-Keep the bucket private. The browser receives temporary presigned upload URLs,
-and playback should later be served through signed URLs or a CDN layer.
+Unlike the local stack, the production compose file does not provision MinIO or
+create a bucket for you. It assumes PostgreSQL, RabbitMQ, and your
+S3-compatible storage are already available and correctly configured.
