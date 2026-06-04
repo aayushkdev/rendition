@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 from core.db.session import get_db
 from api.schemas.video import (
@@ -12,6 +12,7 @@ from api.schemas.video import (
     VideoUploadRefreshRequest,
 )
 from core.config import settings
+from core.models.enums import ProcessingStatus
 from core.queue import JobQueuePublisher, get_job_queue_publisher
 from core.services.outbox_service import publish_pending_outbox_messages
 from core.services.upload_service import (
@@ -37,8 +38,13 @@ def get_upload_config():
 
 
 @router.get("", response_model=list[VideoListItem])
-def get_videos(db: Session = Depends(get_db)):
-    return list_videos(db)
+def get_videos(
+    db: Session = Depends(get_db),
+    video_status: ProcessingStatus | None = Query(None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    return list_videos(db, status=video_status, page=page, page_size=page_size)
 
 
 @router.post(

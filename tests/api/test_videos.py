@@ -1,7 +1,9 @@
+from datetime import datetime, timedelta, timezone
+
 from core.models.job import Job
 from core.models.outbox import OutboxMessage
 from core.models.rendition import Rendition
-from core.models.enums import UploadStatus
+from core.models.enums import ProcessingStatus, UploadStatus
 from core.models.upload_session import UploadSession
 from core.models.video import Video
 
@@ -49,6 +51,56 @@ def test_list_videos_returns_persisted_uploads(client):
     ]
 
 
+def test_list_videos_can_filter_done_videos(client, db_session):
+    db_session.add_all(
+        [
+            Video(
+                source="done.mp4",
+                source_filename="done.mp4",
+                status=ProcessingStatus.done,
+                created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+            ),
+            Video(
+                source="running.mp4",
+                source_filename="running.mp4",
+                status=ProcessingStatus.running,
+                created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/videos?status=done")
+
+    assert response.status_code == 200
+    assert [video["title"] for video in response.json()] == ["done.mp4"]
+    assert {video["status"] for video in response.json()} == {"done"}
+
+
+def test_list_videos_can_paginate(client, db_session):
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db_session.add_all(
+        [
+            Video(
+                source=f"video-{index}.mp4",
+                source_filename=f"video-{index}.mp4",
+                status=ProcessingStatus.done,
+                created_at=base_time + timedelta(minutes=index),
+            )
+            for index in range(5)
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/v1/videos?status=done&page=2&page_size=2")
+
+    assert response.status_code == 200
+    assert [video["title"] for video in response.json()] == [
+        "video-2.mp4",
+        "video-1.mp4",
+    ]
+
+
 def test_create_video_returns_multipart_upload_session(client, db_session):
     response = client.post(
         "/api/v1/videos",
@@ -73,6 +125,25 @@ def test_create_video_returns_multipart_upload_session(client, db_session):
     assert db_session.query(Rendition).count() == 0
     assert db_session.query(Job).count() == 0
     assert db_session.query(OutboxMessage).count() == 0
+
+
+def test_create_video_accepts_large_upload_size(client, db_session):
+    response = client.post(
+        "/api/v1/videos",
+        json={
+            "filename": "large-video.mp4",
+            "content_type": "video/mp4",
+            "size_bytes": 3_095_505_925,
+            "part_count": 370,
+        },
+    )
+
+    assert response.status_code == 201
+
+    video = db_session.query(Video).one()
+    upload_session = db_session.query(UploadSession).one()
+    assert video.source_size_bytes == 3_095_505_925
+    assert upload_session.size_bytes == 3_095_505_925
 
 
 def test_create_video_rejects_invalid_upload_request(client):

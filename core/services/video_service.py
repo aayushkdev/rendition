@@ -87,8 +87,24 @@ def get_video_state(db: Session, video_id: UUID) -> VideoState | None:
     )
 
 
-def list_videos(db: Session) -> list[VideoListItem]:
-    videos = db.query(Video).order_by(Video.created_at.desc()).all()
+def list_videos(
+    db: Session,
+    *,
+    status: ProcessingStatus | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> list[VideoListItem]:
+    query = db.query(Video)
+
+    if status is not None:
+        query = query.filter(Video.status == status)
+
+    videos = (
+        query.order_by(Video.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
 
     return [
         VideoListItem(

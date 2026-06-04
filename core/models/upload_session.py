@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 import uuid
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String
+from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -40,7 +40,7 @@ class UploadSession(Base):
     object_upload_id: Mapped[str] = mapped_column(String, nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
     content_type: Mapped[str] = mapped_column(String, nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     part_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
     status: Mapped[UploadStatus] = mapped_column(

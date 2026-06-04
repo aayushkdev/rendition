@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 import uuid
-from sqlalchemy import DateTime, Enum, Float, Index, Integer, String
+from sqlalchemy import BigInteger, DateTime, Enum, Float, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -30,7 +30,7 @@ class Video(Base):
     source_bucket: Mapped[str | None] = mapped_column(String, nullable=True)
     source_filename: Mapped[str | None] = mapped_column(String, nullable=True)
     source_content_type: Mapped[str | None] = mapped_column(String, nullable=True)
-    source_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     source_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_bitrate: Mapped[int | None] = mapped_column(Integer, nullable=True)
