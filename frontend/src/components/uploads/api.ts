@@ -52,6 +52,18 @@ export type VideoListItem = {
   size_bytes: number | null;
 };
 
+export type VideoPlayback = {
+  video_id: string;
+  status: VideoState["status"];
+  playable: boolean;
+  streaming: {
+    type: "hls";
+    master_playlist_url: string;
+    expires_at: string | null;
+  };
+  renditions: VideoState["renditions"];
+};
+
 type ApiErrorBody = {
   error?: {
     code?: string;
@@ -135,6 +147,10 @@ export function listVideos(options?: {
 
 export function getVideoState(videoId: string) {
   return requestJson<VideoState>(`/videos/${videoId}`);
+}
+
+export function getVideoPlayback(videoId: string) {
+  return requestJson<VideoPlayback>(`/videos/${videoId}/playback`);
 }
 
 export function refreshVideoUpload(videoId: string, partCount: number) {

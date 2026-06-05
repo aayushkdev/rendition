@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -76,6 +77,7 @@ function toFeedVideo(video: VideoListItem): FeedVideo {
 }
 
 export function VideoFeed() {
+  const router = useRouter();
   const [selectedVideo, setSelectedVideo] = useState<FeedVideo | null>(null);
   const [videos, setVideos] = useState<FeedVideo[]>([]);
   const [page, setPage] = useState(1);
@@ -125,6 +127,10 @@ export function VideoFeed() {
 
   function refreshFeed() {
     void loadVideos(page, true);
+  }
+
+  function openVideo(video: FeedVideo) {
+    router.push(`/videos/${video.id}`);
   }
 
   return (
@@ -245,7 +251,7 @@ export function VideoFeed() {
                 <VideoCard
                   key={video.id}
                   video={video}
-                  onSelect={setSelectedVideo}
+                  onSelect={openVideo}
                 />
               ))}
             </section>

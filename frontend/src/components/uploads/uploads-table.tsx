@@ -210,16 +210,27 @@ export function UploadsTable({
                         </Button>
                       </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            toast.info("Playback view not wired yet", {
-                              description: video.title,
-                            })
-                          }
-                        >
-                          <Play className="size-4" />
-                          Open
-                        </DropdownMenuItem>
+                        {video.videoId ? (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              window.location.href = `/videos/${video.videoId}`;
+                            }}
+                          >
+                            <Play className="size-4" />
+                            Open
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              toast.info("Video link unavailable", {
+                                description: video.title,
+                              })
+                            }
+                          >
+                            <Play className="size-4" />
+                            Open
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           onSelect={() =>
                             video.videoId
