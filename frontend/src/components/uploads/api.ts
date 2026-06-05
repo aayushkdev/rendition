@@ -133,6 +133,10 @@ export function listVideos(options?: {
   return requestJson<VideoListItem[]>(`/videos${query ? `?${query}` : ""}`);
 }
 
+export function getVideoState(videoId: string) {
+  return requestJson<VideoState>(`/videos/${videoId}`);
+}
+
 export function refreshVideoUpload(videoId: string, partCount: number) {
   return requestJson<VideoCreateResponse>(`/videos/${videoId}/upload/refresh`, {
     method: "POST",

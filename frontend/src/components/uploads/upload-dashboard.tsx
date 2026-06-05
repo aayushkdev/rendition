@@ -13,10 +13,12 @@ import {
 } from "@/components/animate-ui/components/radix/tooltip";
 
 import {
+  getVideoState,
   getUploadConfig,
   listVideos,
   type UploadConfigResponse,
   type VideoListItem,
+  type VideoState,
 } from "./api";
 import {
   createMultipartUploadController,
@@ -49,6 +51,31 @@ function mapVideoStatus(status: VideoListItem["status"]): UploadedVideo["status"
   return "pending";
 }
 
+function progressForVideoStatus(status: VideoListItem["status"]) {
+  if (status === "done" || status === "skipped") return 100;
+  if (status === "failed") return 0;
+  if (status === "partial") return 75;
+  return 25;
+}
+
+function isPollableStatus(status: UploadedVideo["status"]) {
+  return status === "pending" || status === "processing" || status === "partial";
+}
+
+function renditionProgressFromState(state: VideoState) {
+  const relevantRenditions = state.renditions.filter(
+    (rendition) => rendition.status !== "skipped",
+  );
+  const completed = relevantRenditions.filter(
+    (rendition) => rendition.status === "done",
+  ).length;
+
+  return {
+    completed,
+    total: relevantRenditions.length,
+  };
+}
+
 function toUploadedVideo(video: VideoListItem): UploadedVideo {
   return {
     id: video.video_id,
@@ -57,20 +84,14 @@ function toUploadedVideo(video: VideoListItem): UploadedVideo {
     uploadedAt: formatUploadDate(video.uploaded_at ?? video.created_at),
     status: mapVideoStatus(video.status),
     size: video.size_bytes === null ? "-" : formatBytes(video.size_bytes),
-    progress:
-      video.status === "done"
-        ? 100
-        : video.status === "failed"
-          ? 0
-          : video.status === "partial"
-            ? 75
-            : 25,
+    progress: progressForVideoStatus(video.status),
   };
 }
 
 export function UploadDashboard() {
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadControllersRef = useRef(new Map<string, MultipartUploadController>());
+  const videosRef = useRef<UploadedVideo[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadRows, setUploadRows] = useState<UploadedVideo[]>([]);
   const [videos, setVideos] = useState<UploadedVideo[]>([]);
@@ -99,8 +120,12 @@ export function UploadDashboard() {
   }, []);
 
   useEffect(() => {
+    videosRef.current = videos;
+  }, [videos]);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => {
-      void loadVideos();
+      void pollVideoStates();
     }, 10000);
 
     return () => {
@@ -115,6 +140,44 @@ export function UploadDashboard() {
       toast.error("Upload limits unavailable", {
         description:
           error instanceof Error ? error.message : "Unable to load upload configuration",
+      });
+    }
+  }
+
+  async function pollVideoStates() {
+    const pollableVideos = videosRef.current.filter(
+      (video) => video.videoId && isPollableStatus(video.status),
+    );
+
+    if (pollableVideos.length === 0) return;
+
+    try {
+      const states = await Promise.all(
+        pollableVideos.map((video) => getVideoState(video.videoId as string)),
+      );
+      const statesByVideoId = new Map(
+        states.map((state) => [state.video_id, state]),
+      );
+
+      setVideos((current) =>
+        current.map((video) => {
+          if (!video.videoId) return video;
+
+          const state = statesByVideoId.get(video.videoId);
+          if (!state) return video;
+
+          return {
+            ...video,
+            status: mapVideoStatus(state.status),
+            progress: progressForVideoStatus(state.status),
+            renditionProgress: renditionProgressFromState(state),
+          };
+        }),
+      );
+    } catch (error: unknown) {
+      toast.error("Video statuses unavailable", {
+        description:
+          error instanceof Error ? error.message : "Unable to refresh video statuses",
       });
     }
   }
@@ -191,7 +254,7 @@ export function UploadDashboard() {
       setUploadRows((current) =>
         current.filter((row) => row.id !== snapshot.row.id),
       );
-      void loadVideos();
+      void loadVideos().then(() => pollVideoStates());
       return;
     }
 

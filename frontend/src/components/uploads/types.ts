@@ -15,6 +15,10 @@ export type UploadedVideo = {
   status: VideoStatus;
   size: string;
   progress: number;
+  renditionProgress?: {
+    completed: number;
+    total: number;
+  };
   canRetry?: boolean;
   canCancel?: boolean;
 };

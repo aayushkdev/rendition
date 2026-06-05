@@ -8,7 +8,7 @@ type StatusCellProps = {
 };
 
 export function StatusCell({ video }: StatusCellProps) {
-  if (video.status === "uploading" || video.status === "processing") {
+  if (video.status === "uploading") {
     return (
       <div className="flex min-w-44 flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
@@ -19,6 +19,20 @@ export function StatusCell({ video }: StatusCellProps) {
         </div>
         <Progress value={video.progress} className="h-2" />
       </div>
+    );
+  }
+
+  if (
+    (video.status === "pending" ||
+      video.status === "processing" ||
+      video.status === "partial") &&
+    video.renditionProgress
+  ) {
+    const { completed, total } = video.renditionProgress;
+    return (
+      <span className="text-sm font-medium text-foreground">
+        {completed}/{total} renditions done
+      </span>
     );
   }
 
