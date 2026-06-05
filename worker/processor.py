@@ -1,4 +1,5 @@
 from enum import Enum
+import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -36,6 +37,8 @@ HLS_PLAYLIST_CONTENT_TYPE = "application/vnd.apple.mpegurl"
 HLS_SEGMENT_CONTENT_TYPE = "video/mp2t"
 HLS_PLAYLIST_CACHE_CONTROL = "max-age=60"
 HLS_SEGMENT_CACHE_CONTROL = "max-age=31536000, immutable"
+
+logger = logging.getLogger("rendition.worker.processor")
 
 
 class WorkerMessageAction(str, Enum):
@@ -167,6 +170,17 @@ def process_encoding_message(
                 str(exc),
                 storage=storage,
             )
+        logger.exception(
+            "encoding job failed job_id=%s video_id=%s rendition_id=%s resolution=%s attempt=%s/%s retry=%s error=%s",
+            context.job_id,
+            context.video_id,
+            context.rendition_id,
+            context.resolution,
+            context.attempt_count + 1,
+            context.max_attempts,
+            should_retry,
+            exc,
+        )
         if should_retry:
             return WorkerMessageAction.requeue
         return WorkerMessageAction.ack
