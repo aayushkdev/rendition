@@ -73,6 +73,8 @@ services:
       context: .
       dockerfile: worker/Dockerfile
     depends_on:
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       rabbitmq:
@@ -122,6 +124,8 @@ services:
       dockerfile: worker/Dockerfile
     command: ["uv", "run", "--no-dev", "python", "-m", "worker.outbox"]
     depends_on:
+      api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       rabbitmq:
