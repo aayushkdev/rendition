@@ -1,5 +1,6 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from core.db.session import get_db
 from api.schemas.video import (
@@ -7,6 +8,7 @@ from api.schemas.video import (
     VideoCreateRequest,
     VideoCreateResponse,
     VideoListItem,
+    VideoPlaybackResponse,
     VideoState,
     VideoUploadCompleteRequest,
     VideoUploadRefreshRequest,
@@ -21,10 +23,20 @@ from core.services.upload_service import (
     create_video_upload,
     refresh_video_upload,
 )
+from core.services.playback_service import (
+    HLS_MASTER_CONTENT_TYPE,
+    build_playback_master_playlist,
+    build_playback_variant_playlist,
+    get_video_playback,
+)
 from core.services.video_service import VideoNotFoundError, get_video_state, list_videos
 from core.storage import ObjectStorage, get_object_storage
 
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+
+def _playback_path(video_id: UUID) -> str:
+    return f"/api/v1/videos/{video_id}/playback"
 
 
 @router.get("/upload/config", response_model=UploadConfigResponse)
@@ -73,6 +85,72 @@ def get_video(video_id: UUID, db: Session = Depends(get_db)):
         raise VideoNotFoundError("Video not found")
 
     return state
+
+
+@router.get("/{video_id}/playback", response_model=VideoPlaybackResponse)
+def get_playback(
+    video_id: UUID,
+    db: Session = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+):
+    playback = get_video_playback(
+        db=db,
+        storage=storage,
+        video_id=video_id,
+        master_playlist_url=f"{_playback_path(video_id)}/master.m3u8",
+    )
+
+    if playback is None:
+        raise VideoNotFoundError("Video not found")
+
+    return playback
+
+
+@router.get("/{video_id}/playback/master.m3u8")
+def get_playback_master_playlist(
+    video_id: UUID,
+    db: Session = Depends(get_db),
+):
+    playlist = build_playback_master_playlist(
+        db=db,
+        video_id=video_id,
+        variant_url_for_resolution=lambda resolution: (
+            f"{_playback_path(video_id)}/{resolution}/index.m3u8"
+        ),
+    )
+
+    if playlist is None:
+        raise VideoNotFoundError("Video not found")
+
+    return Response(
+        content=playlist,
+        media_type=HLS_MASTER_CONTENT_TYPE,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/{video_id}/playback/{resolution}/index.m3u8")
+def get_playback_variant_playlist(
+    video_id: UUID,
+    resolution: str,
+    db: Session = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+):
+    playlist = build_playback_variant_playlist(
+        db=db,
+        storage=storage,
+        video_id=video_id,
+        resolution=resolution,
+    )
+
+    if playlist is None:
+        raise VideoNotFoundError("Video not found")
+
+    return Response(
+        content=playlist,
+        media_type=HLS_MASTER_CONTENT_TYPE,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.post("/{video_id}/upload/complete", response_model=VideoState)

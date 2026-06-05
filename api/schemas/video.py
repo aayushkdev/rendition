@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 import re
 
@@ -111,3 +112,22 @@ class VideoListItem(BaseModel):
     created_at: datetime
     status: ProcessingStatus
     size_bytes: int | None
+
+
+class PlaybackRenditionState(BaseModel):
+    resolution: str
+    status: ProcessingStatus
+
+
+class StreamingInfo(BaseModel):
+    type: Literal["hls"]
+    master_playlist_url: str
+    expires_at: datetime | None = None
+
+
+class VideoPlaybackResponse(BaseModel):
+    video_id: UUID
+    status: ProcessingStatus
+    playable: bool
+    streaming: StreamingInfo
+    renditions: List[PlaybackRenditionState]

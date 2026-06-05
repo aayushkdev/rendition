@@ -10,6 +10,10 @@ from core.services.upload_service import (
     VideoUploadStorageError,
     VideoUploadValidationError,
 )
+from core.services.playback_service import (
+    VideoPlaybackNotReadyError,
+    VideoPlaybackStorageError,
+)
 from core.services.video_service import VideoNotFoundError
 
 
@@ -67,6 +71,30 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def video_upload_storage_handler(
         request: Request,
         _exc: VideoUploadStorageError,
+    ) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=502,
+            code="storage_unavailable",
+            message="Storage unavailable",
+        )
+
+    @app.exception_handler(VideoPlaybackNotReadyError)
+    async def video_playback_not_ready_handler(
+        request: Request,
+        exc: VideoPlaybackNotReadyError,
+    ) -> JSONResponse:
+        return _error_response(
+            request=request,
+            status_code=409,
+            code="video_not_playable",
+            message=str(exc),
+        )
+
+    @app.exception_handler(VideoPlaybackStorageError)
+    async def video_playback_storage_handler(
+        request: Request,
+        _exc: VideoPlaybackStorageError,
     ) -> JSONResponse:
         return _error_response(
             request=request,

@@ -161,6 +161,24 @@ def test_upload_and_download_object_helpers_call_s3():
     ]
 
 
+def test_download_bytes_reads_s3_object_body():
+    storage, client, _presign_client = make_storage()
+    client.object_body = b"#EXTM3U"
+
+    body = storage.download_bytes("hls/video/720p/index.m3u8")
+
+    assert body == b"#EXTM3U"
+    assert client.calls == [
+        (
+            "get_object",
+            {
+                "Bucket": "rendition",
+                "Key": "hls/video/720p/index.m3u8",
+            },
+        )
+    ]
+
+
 def test_delete_object_calls_s3():
     storage, client, _presign_client = make_storage()
 
@@ -268,6 +286,13 @@ def test_abort_multipart_upload_wraps_boto_failures():
             lambda storage: storage.download_file(
                 "source/video/input.mp4",
                 "/tmp/input.mp4",
+            ),
+            "failed to download object",
+        ),
+        (
+            "get_object",
+            lambda storage: storage.download_bytes(
+                "hls/video/720p/index.m3u8",
             ),
             "failed to download object",
         ),

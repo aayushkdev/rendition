@@ -7,6 +7,51 @@ from core.models.rendition import Rendition
 from core.models.enums import ProcessingStatus, UploadStatus
 from core.models.upload_session import UploadSession
 from core.models.video import Video
+from core.storage import build_hls_master_key, build_hls_playlist_key
+
+
+def create_playable_video(db_session, storage):
+    video = Video(
+        source="video.mp4",
+        source_filename="video.mp4",
+        status=ProcessingStatus.done,
+    )
+    db_session.add(video)
+    db_session.flush()
+
+    master_key = build_hls_master_key(video.id)
+    video.playback_path = master_key
+
+    for resolution in ["720p", "480p"]:
+        playlist_key = build_hls_playlist_key(video.id, resolution)
+        db_session.add(
+            Rendition(
+                video_id=video.id,
+                resolution=resolution,
+                bitrate=1_000_000,
+                status=ProcessingStatus.done,
+                output_path=playlist_key,
+            )
+        )
+        storage.upload_bytes(
+            key=playlist_key,
+            body=(
+                "#EXTM3U\n"
+                "#EXT-X-TARGETDURATION:6\n"
+                "#EXTINF:6.0,\n"
+                "segments/segment_00000.ts\n"
+                "#EXT-X-ENDLIST\n"
+            ).encode("utf-8"),
+            content_type="application/vnd.apple.mpegurl",
+        )
+
+    storage.upload_bytes(
+        key=master_key,
+        body=b"#EXTM3U\n",
+        content_type="application/vnd.apple.mpegurl",
+    )
+    db_session.commit()
+    return video
 
 
 def test_get_upload_config_returns_backend_limits(client):
@@ -100,6 +145,70 @@ def test_list_videos_can_paginate(client, db_session):
         "video-2.mp4",
         "video-1.mp4",
     ]
+
+
+def test_get_video_playback_returns_api_playlist_url(client, db_session):
+    video = create_playable_video(db_session, client.storage)
+
+    response = client.get(f"/api/v1/videos/{video.id}/playback")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["video_id"] == str(video.id)
+    assert payload["status"] == "done"
+    assert payload["playable"] is True
+    assert payload["streaming"]["type"] == "hls"
+    assert payload["streaming"]["master_playlist_url"].endswith(
+        f"/api/v1/videos/{video.id}/playback/master.m3u8"
+    )
+    assert payload["streaming"]["expires_at"]
+    assert {rendition["resolution"] for rendition in payload["renditions"]} == {
+        "720p",
+        "480p",
+    }
+
+
+def test_get_video_playback_rejects_unfinished_video(client, db_session):
+    video = Video(
+        source="video.mp4",
+        source_filename="video.mp4",
+        status=ProcessingStatus.running,
+    )
+    db_session.add(video)
+    db_session.commit()
+
+    response = client.get(f"/api/v1/videos/{video.id}/playback")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "video_not_playable"
+
+
+def test_get_playback_master_playlist_uses_api_variant_urls(client, db_session):
+    video = create_playable_video(db_session, client.storage)
+
+    response = client.get(f"/api/v1/videos/{video.id}/playback/master.m3u8")
+
+    assert response.status_code == 200
+    playlist = response.text
+    assert "#EXTM3U" in playlist
+    assert f"/api/v1/videos/{video.id}/playback/720p/index.m3u8" in playlist
+    assert f"/api/v1/videos/{video.id}/playback/480p/index.m3u8" in playlist
+    assert "hls/" not in playlist
+
+
+def test_get_playback_variant_playlist_signs_segments(client, db_session):
+    video = create_playable_video(db_session, client.storage)
+
+    response = client.get(f"/api/v1/videos/{video.id}/playback/720p/index.m3u8")
+
+    assert response.status_code == 200
+    playlist = response.text
+    assert "#EXTM3U" in playlist
+    assert (
+        f"http://playback.test/hls/{video.id}/720p/segments/segment_00000.ts"
+        in playlist
+    )
+    assert "\nsegments/segment_00000.ts\n" not in playlist
 
 
 def test_create_video_returns_multipart_upload_session(client, db_session):

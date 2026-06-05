@@ -88,6 +88,8 @@ class ObjectStorage(Protocol):
 
     def download_file(self, key: str, local_path: str) -> None: ...
 
+    def download_bytes(self, key: str) -> bytes: ...
+
     def delete_object(self, key: str) -> None: ...
 
     def generate_presigned_download_url(self, key: str) -> str: ...
@@ -297,6 +299,13 @@ class S3ObjectStorage:
                 Filename=local_path,
             )
         except (BotoCoreError, ClientError, S3UploadFailedError) as exc:
+            raise ObjectStorageError("failed to download object") from exc
+
+    def download_bytes(self, key: str) -> bytes:
+        try:
+            response = self._client.get_object(Bucket=self._bucket, Key=key)
+            return response["Body"].read()
+        except (BotoCoreError, ClientError) as exc:
             raise ObjectStorageError("failed to download object") from exc
 
     def delete_object(self, key: str) -> None:

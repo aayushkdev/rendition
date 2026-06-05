@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -164,6 +165,17 @@ class FakeObjectStorage:
 
         self.downloads.append({"key": key, "local_path": local_path})
         Path(local_path).write_bytes(self.download_body)
+
+    def download_bytes(self, key: str) -> bytes:
+        if self.fail_download_file:
+            raise ObjectStorageError("download failed")
+
+        self.downloads.append({"key": key})
+        if key in self.metadata_by_key:
+            for upload in [*self.uploaded_bytes, *self.uploaded_files]:
+                if upload["key"] == key:
+                    return upload.get("body", self.download_body)
+        return self.download_body
 
     def delete_object(self, key: str) -> None:
         if self.fail_delete:
@@ -347,6 +359,7 @@ class FakeS3Client:
             "ContentLength": 12345,
             "ContentType": "video/mp4",
         }
+        self.object_body = b"object-body"
 
     def create_multipart_upload(self, **kwargs):
         if "create_multipart_upload" in self.fail_operations:
@@ -394,6 +407,12 @@ class FakeS3Client:
         if "download_file" in self.fail_operations:
             raise BotoCoreError()
         self.calls.append(("download_file", kwargs))
+
+    def get_object(self, **kwargs):
+        if "get_object" in self.fail_operations:
+            raise BotoCoreError()
+        self.calls.append(("get_object", kwargs))
+        return {"Body": BytesIO(self.object_body)}
 
     def delete_object(self, **kwargs):
         if "delete_object" in self.fail_operations:
