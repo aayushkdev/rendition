@@ -4,7 +4,6 @@ from uuid import UUID
 import pytest
 
 from core.encoding import (
-    EncodingPresetError,
     HlsEncoder,
     VideoProbeError,
     VideoProber,
@@ -28,9 +27,12 @@ def test_get_hls_preset_returns_known_resolution():
     assert preset.ffmpeg_video_bitrate == "2800k"
 
 
-def test_get_hls_preset_rejects_unknown_resolution():
-    with pytest.raises(EncodingPresetError):
-        get_hls_preset("144p")
+def test_get_hls_preset_falls_back_to_144p_for_unknown_resolution():
+    preset = get_hls_preset("unknown")
+
+    assert preset.resolution == "144p"
+    assert preset.width == 256
+    assert preset.height == 144
 
 
 def test_hls_preset_applicability_uses_dimensions_and_soft_bitrate():

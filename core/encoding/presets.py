@@ -7,6 +7,9 @@ class EncodingPresetError(ValueError):
     pass
 
 
+FALLBACK_HLS_RESOLUTION = "144p"
+
+
 @dataclass(frozen=True)
 class EncodingPreset:
     resolution: str
@@ -39,6 +42,27 @@ HLS_PRESETS: dict[str, EncodingPreset] = {
         height=480,
         video_bitrate=1_200_000,
     ),
+    "360p": EncodingPreset(
+        resolution="360p",
+        width=640,
+        height=360,
+        video_bitrate=800_000,
+        audio_bitrate="96k",
+    ),
+    "240p": EncodingPreset(
+        resolution="240p",
+        width=426,
+        height=240,
+        video_bitrate=400_000,
+        audio_bitrate="64k",
+    ),
+    "144p": EncodingPreset(
+        resolution="144p",
+        width=256,
+        height=144,
+        video_bitrate=150_000,
+        audio_bitrate="48k",
+    ),
 }
 
 DEFAULT_HLS_RENDITIONS = list(HLS_PRESETS.values())
@@ -59,7 +83,4 @@ def is_hls_preset_applicable(
 
 
 def get_hls_preset(resolution: str) -> EncodingPreset:
-    try:
-        return HLS_PRESETS[resolution]
-    except KeyError as exc:
-        raise EncodingPresetError(f"unsupported HLS resolution: {resolution}") from exc
+    return HLS_PRESETS.get(resolution, HLS_PRESETS[FALLBACK_HLS_RESOLUTION])

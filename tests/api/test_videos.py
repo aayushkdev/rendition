@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from core.encoding import DEFAULT_HLS_RENDITIONS
 from core.models.job import Job
 from core.models.outbox import OutboxMessage
 from core.models.rendition import Rendition
@@ -206,9 +207,9 @@ def test_get_video_returns_production_response_shape(client, db_session):
     upload_session = db_session.query(UploadSession).one()
     assert upload_session.status == UploadStatus.completed
     assert upload_session.completed_at is not None
-    assert db_session.query(Job).count() == 3
+    assert db_session.query(Job).count() == len(DEFAULT_HLS_RENDITIONS)
     outbox_messages = db_session.query(OutboxMessage).order_by(OutboxMessage.created_at)
-    assert outbox_messages.count() == 3
+    assert outbox_messages.count() == len(DEFAULT_HLS_RENDITIONS)
     assert {
         (message.job_id, message.video_id, message.rendition_id)
         for message in outbox_messages
@@ -216,7 +217,7 @@ def test_get_video_returns_production_response_shape(client, db_session):
         (job.id, job.video_id, job.rendition_id) for job in db_session.query(Job).all()
     }
     assert {message.status for message in outbox_messages} == {"published"}
-    assert len(client.publisher.published_messages) == 3
+    assert len(client.publisher.published_messages) == len(DEFAULT_HLS_RENDITIONS)
     assert {
         (
             published["message"].job_id,
@@ -234,6 +235,9 @@ def test_get_video_returns_production_response_shape(client, db_session):
             {"resolution": "1080p", "status": "pending"},
             {"resolution": "720p", "status": "pending"},
             {"resolution": "480p", "status": "pending"},
+            {"resolution": "360p", "status": "pending"},
+            {"resolution": "240p", "status": "pending"},
+            {"resolution": "144p", "status": "pending"},
         ],
     }
 
