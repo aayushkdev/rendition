@@ -93,6 +93,7 @@ def test_list_videos_returns_persisted_uploads(client):
             "created_at": response.json()[0]["created_at"],
             "status": "uploading",
             "size_bytes": 12_345,
+            "renditions": [],
         }
     ]
 

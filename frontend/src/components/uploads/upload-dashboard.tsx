@@ -2,15 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Activity, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/animate-ui/components/buttons/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/animate-ui/components/radix/tooltip";
 
 import {
   getVideoState,
@@ -18,7 +13,6 @@ import {
   listVideos,
   type UploadConfigResponse,
   type VideoListItem,
-  type VideoState,
 } from "./api";
 import {
   createMultipartUploadController,
@@ -26,11 +20,10 @@ import {
   type MultipartUploadController,
   type MultipartUploadSnapshot,
 } from "./multipart-upload";
-import { StatusBadge } from "./status-badge";
 import type { UploadedVideo } from "./types";
 import { UploadDropzone } from "./upload-dropzone";
 import { UploadsTable } from "./uploads-table";
-import { formatBytes } from "./utils";
+import { formatBytes, renditionProgressFromRenditions } from "./utils";
 
 function formatUploadDate(value: string | null) {
   if (!value) return "Not uploaded";
@@ -62,20 +55,6 @@ function isPollableStatus(status: UploadedVideo["status"]) {
   return status === "pending" || status === "processing" || status === "partial";
 }
 
-function renditionProgressFromState(state: VideoState) {
-  const relevantRenditions = state.renditions.filter(
-    (rendition) => rendition.status !== "skipped",
-  );
-  const completed = relevantRenditions.filter(
-    (rendition) => rendition.status === "done",
-  ).length;
-
-  return {
-    completed,
-    total: relevantRenditions.length,
-  };
-}
-
 function toUploadedVideo(video: VideoListItem): UploadedVideo {
   return {
     id: video.video_id,
@@ -85,6 +64,7 @@ function toUploadedVideo(video: VideoListItem): UploadedVideo {
     status: mapVideoStatus(video.status),
     size: video.size_bytes === null ? "-" : formatBytes(video.size_bytes),
     progress: progressForVideoStatus(video.status),
+    renditionProgress: renditionProgressFromRenditions(video.renditions),
   };
 }
 
@@ -170,7 +150,7 @@ export function UploadDashboard() {
             ...video,
             status: mapVideoStatus(state.status),
             progress: progressForVideoStatus(state.status),
-            renditionProgress: renditionProgressFromState(state),
+            renditionProgress: renditionProgressFromRenditions(state.renditions),
           };
         }),
       );
@@ -311,15 +291,6 @@ export function UploadDashboard() {
                 Uploads
               </h1>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <StatusBadge status="processing" />
-            <Tooltip>
-              <TooltipTrigger className="inline-flex size-9 items-center justify-center rounded-md border border-border bg-card text-muted-foreground">
-                <Activity className="size-4" />
-              </TooltipTrigger>
-              <TooltipContent>Encoder status</TooltipContent>
-            </Tooltip>
           </div>
         </header>
 

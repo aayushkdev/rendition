@@ -112,6 +112,7 @@ class VideoListItem(BaseModel):
     created_at: datetime
     status: ProcessingStatus
     size_bytes: int | None
+    renditions: List[RenditionState]
 
 
 class PlaybackRenditionState(BaseModel):

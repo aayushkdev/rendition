@@ -23,12 +23,14 @@ export function StatusCell({ video }: StatusCellProps) {
   }
 
   if (
-    (video.status === "pending" ||
-      video.status === "processing" ||
-      video.status === "partial") &&
-    video.renditionProgress
+    video.status === "pending" ||
+    video.status === "processing" ||
+    video.status === "partial"
   ) {
-    const { completed, total } = video.renditionProgress;
+    const { completed, total } = video.renditionProgress ?? {
+      completed: 0,
+      total: 0,
+    };
     return (
       <span className="text-sm font-medium text-foreground">
         {completed}/{total} renditions done

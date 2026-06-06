@@ -14,6 +14,7 @@ import {
 } from "@/components/uploads/api";
 import { StatusBadge } from "@/components/uploads/status-badge";
 import type { VideoStatus } from "@/components/uploads/types";
+import { renditionProgressFromRenditions } from "@/components/uploads/utils";
 
 import { HlsPlayer } from "./hls-player";
 
@@ -26,11 +27,25 @@ function isPlayable(status: VideoState["status"]) {
 }
 
 function mapStatus(status: VideoState["status"]): VideoStatus {
-  if (status === "running") return "processing";
-  if (status === "partial") return "partial";
   if (status === "done" || status === "skipped") return "done";
   if (status === "failed") return "failed";
-  return "pending";
+  return "processing";
+}
+
+function shouldShowRenditionProgress(status: VideoState["status"]) {
+  return status === "pending" || status === "running" || status === "partial";
+}
+
+function RenditionProgressLabel({ videoState }: { videoState: VideoState }) {
+  const { completed, total } = renditionProgressFromRenditions(
+    videoState.renditions,
+  );
+
+  return (
+    <span className="text-sm font-medium text-foreground">
+      {completed}/{total} renditions done
+    </span>
+  );
 }
 
 export function VideoDetail({ videoId }: VideoDetailProps) {
@@ -124,7 +139,13 @@ export function VideoDetail({ videoId }: VideoDetailProps) {
               </h1>
             </div>
           </div>
-          {videoState ? <StatusBadge status={mapStatus(videoState.status)} /> : null}
+          {videoState ? (
+            shouldShowRenditionProgress(videoState.status) ? (
+              <RenditionProgressLabel videoState={videoState} />
+            ) : (
+              <StatusBadge status={mapStatus(videoState.status)} />
+            )
+          ) : null}
         </header>
 
         <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">

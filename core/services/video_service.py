@@ -94,7 +94,7 @@ def list_videos(
     page: int = 1,
     page_size: int = 20,
 ) -> list[VideoListItem]:
-    query = db.query(Video)
+    query = db.query(Video).options(selectinload(Video.renditions))
 
     if status is not None:
         query = query.filter(Video.status == status)
@@ -114,6 +114,13 @@ def list_videos(
             created_at=video.created_at,
             status=video.status,
             size_bytes=video.source_size_bytes,
+            renditions=[
+                RenditionState(
+                    resolution=rendition.resolution,
+                    status=rendition.status,
+                )
+                for rendition in video.renditions
+            ],
         )
         for video in videos
     ]

@@ -50,6 +50,7 @@ export type VideoListItem = {
   created_at: string;
   status: VideoState["status"];
   size_bytes: number | null;
+  renditions: VideoState["renditions"];
 };
 
 export type VideoPlayback = {
