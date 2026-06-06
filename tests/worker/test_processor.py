@@ -79,7 +79,7 @@ def test_process_encoding_message_generates_master_playlist_on_final_rendition(
     assert storage.uploaded_bytes[0]["key"] == f"hls/{video.id}/master.m3u8"
 
 
-def test_process_encoding_message_requeues_retryable_failure(db_session):
+def test_process_encoding_message_acks_scheduled_retry_failure(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
 
@@ -98,12 +98,13 @@ def test_process_encoding_message_requeues_retryable_failure(db_session):
     )
 
     db_session.refresh(job)
-    assert action == WorkerMessageAction.requeue
+    assert action == WorkerMessageAction.ack
     assert job.status == ProcessingStatus.pending
     assert job.attempt_count == 1
+    assert job.next_run_at is not None
 
 
-def test_process_encoding_message_acks_terminal_failure(db_session):
+def test_process_encoding_message_rejects_terminal_failure(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
     job.attempt_count = job.max_attempts - 1
@@ -124,7 +125,7 @@ def test_process_encoding_message_acks_terminal_failure(db_session):
     )
 
     db_session.refresh(job)
-    assert action == WorkerMessageAction.ack
+    assert action == WorkerMessageAction.reject
     assert job.status == ProcessingStatus.failed
 
 

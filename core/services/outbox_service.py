@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from core.models.enums import OutboxStatus
+from core.models.enums import OutboxStatus, ProcessingStatus
 from core.models.job import Job
 from core.models.outbox import OutboxMessage
 from core.queue.messages import (
@@ -44,7 +45,15 @@ def publish_pending_outbox_messages(
 
     query = (
         db.query(OutboxMessage)
+        .join(Job, OutboxMessage.job_id == Job.id)
         .filter(OutboxMessage.status == OutboxStatus.pending)
+        .filter(Job.status == ProcessingStatus.pending)
+        .filter(
+            or_(
+                Job.next_run_at.is_(None),
+                Job.next_run_at <= datetime.now(timezone.utc),
+            )
+        )
         .order_by(OutboxMessage.created_at)
         .with_for_update(skip_locked=True, of=OutboxMessage)
     )

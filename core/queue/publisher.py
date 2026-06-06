@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 
 from core.config import settings
 from core.queue.messages import (
+    ENCODING_DEAD_LETTER_EXCHANGE,
+    ENCODING_DEAD_LETTER_ROUTING_KEY,
     ENCODING_EXCHANGE,
     ENCODING_ROUTING_KEY,
     EncodingJobMessage,
@@ -93,7 +95,26 @@ def setup_encoding_topology(
         exchange_type="direct",
         durable=True,
     )
-    channel.queue_declare(queue=queue_name, durable=True)
+    channel.exchange_declare(
+        exchange=ENCODING_DEAD_LETTER_EXCHANGE,
+        exchange_type="direct",
+        durable=True,
+    )
+    dead_letter_queue_name = f"{queue_name}.dlq"
+    channel.queue_declare(queue=dead_letter_queue_name, durable=True)
+    channel.queue_bind(
+        queue=dead_letter_queue_name,
+        exchange=ENCODING_DEAD_LETTER_EXCHANGE,
+        routing_key=ENCODING_DEAD_LETTER_ROUTING_KEY,
+    )
+    channel.queue_declare(
+        queue=queue_name,
+        durable=True,
+        arguments={
+            "x-dead-letter-exchange": ENCODING_DEAD_LETTER_EXCHANGE,
+            "x-dead-letter-routing-key": ENCODING_DEAD_LETTER_ROUTING_KEY,
+        },
+    )
     channel.queue_bind(
         queue=queue_name,
         exchange=ENCODING_EXCHANGE,

@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
+from core.config import settings
 from core.models.enums import OutboxStatus, ProcessingStatus
 from core.models.job import Job
 from core.models.outbox import OutboxMessage
@@ -98,7 +99,14 @@ def _validate_job_message(
 
 
 def _is_claimable(job: Job) -> bool:
-    return job.status == ProcessingStatus.pending
+    if job.status != ProcessingStatus.pending:
+        return False
+    if job.next_run_at is None:
+        return True
+    next_run_at = job.next_run_at
+    if next_run_at.tzinfo is None:
+        next_run_at = next_run_at.replace(tzinfo=timezone.utc)
+    return next_run_at <= datetime.now(timezone.utc)
 
 
 def _has_exhausted_attempts(job: Job) -> bool:
@@ -109,6 +117,7 @@ def _mark_job_attempts_exhausted(job: Job) -> None:
     job.status = ProcessingStatus.failed
     job.worker_id = None
     job.heartbeat_at = None
+    job.next_run_at = None
     job.rendition.status = ProcessingStatus.failed
     job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
     job.finished_at = datetime.now(timezone.utc)
@@ -124,6 +133,7 @@ def _mark_job_running(job: Job, worker_id: str) -> None:
     job.started_at = now
     job.finished_at = None
     job.error = None
+    job.next_run_at = None
     job.rendition.status = ProcessingStatus.running
     job.rendition.error = None
     job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
@@ -214,6 +224,18 @@ def _clear_job_owner(job: Job) -> None:
     job.heartbeat_at = None
 
 
+def _retry_backoff_for_attempt(attempt_count: int) -> timedelta:
+    backoffs = settings.job_retry_backoff_seconds
+    index = max(0, attempt_count - 1)
+    if index >= len(backoffs):
+        index = len(backoffs) - 1
+    return timedelta(seconds=backoffs[index])
+
+
+def _schedule_retry(job: Job, now: datetime) -> None:
+    job.next_run_at = now + _retry_backoff_for_attempt(job.attempt_count)
+
+
 def _queue_job_for_publish(db: Session, job: Job) -> None:
     if job.outbox_message is None:
         db.add(
@@ -253,6 +275,7 @@ def mark_encoding_job_succeeded(
     now = datetime.now(timezone.utc)
     job.status = ProcessingStatus.done
     _clear_job_owner(job)
+    job.next_run_at = None
     job.finished_at = now
     job.error = None
     job.rendition.status = ProcessingStatus.done
@@ -289,6 +312,7 @@ def mark_encoding_job_skipped(
     now = datetime.now(timezone.utc)
     job.status = ProcessingStatus.done
     _clear_job_owner(job)
+    job.next_run_at = None
     job.finished_at = now
     job.error = reason
     job.rendition.status = ProcessingStatus.skipped
@@ -324,6 +348,11 @@ def mark_encoding_job_failed(
     job.finished_at = datetime.now(timezone.utc)
     job.status = ProcessingStatus.pending if should_retry else ProcessingStatus.failed
     _clear_job_owner(job)
+    if should_retry:
+        _schedule_retry(job, job.finished_at)
+        _queue_job_for_publish(db, job)
+    else:
+        job.next_run_at = None
     job.rendition.status = (
         ProcessingStatus.pending if should_retry else ProcessingStatus.failed
     )
@@ -366,11 +395,13 @@ def reap_stale_encoding_jobs(
             job.status = ProcessingStatus.pending
             job.rendition.status = ProcessingStatus.pending
             job.rendition.error = job.error
+            _schedule_retry(job, now)
             _queue_job_for_publish(db, job)
         else:
             job.status = ProcessingStatus.failed
             job.rendition.status = ProcessingStatus.failed
             job.rendition.error = job.error
+            job.next_run_at = None
 
         job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
 

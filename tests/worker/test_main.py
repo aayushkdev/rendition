@@ -38,7 +38,7 @@ def test_handle_delivery_acks_success(db_session):
     assert channel.rejects == []
 
 
-def test_handle_delivery_nacks_retryable_failure(db_session):
+def test_handle_delivery_acks_scheduled_retry_failure(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
     channel = FakeDeliveryChannel()
@@ -61,9 +61,39 @@ def test_handle_delivery_nacks_retryable_failure(db_session):
         processor=FakeEncodingProcessor(error=RuntimeError("ffmpeg failed")),
     )
 
-    assert channel.acks == []
-    assert channel.nacks == [{"delivery_tag": "delivery-1", "requeue": True}]
+    assert channel.acks == ["delivery-1"]
+    assert channel.nacks == []
     assert channel.rejects == []
+
+
+def test_handle_delivery_rejects_terminal_failure(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    job.attempt_count = job.max_attempts - 1
+    db_session.commit()
+    channel = FakeDeliveryChannel()
+
+    @contextmanager
+    def session_scope():
+        yield db_session
+
+    handle_delivery(
+        channel=channel,
+        method=FakeDeliveryMethod(),
+        body=EncodingJobMessage(
+            job_id=job.id,
+            video_id=job.video_id,
+            rendition_id=job.rendition_id,
+        )
+        .model_dump_json()
+        .encode("utf-8"),
+        session_scope=session_scope,
+        processor=FakeEncodingProcessor(error=RuntimeError("ffmpeg failed")),
+    )
+
+    assert channel.acks == []
+    assert channel.nacks == []
+    assert channel.rejects == [{"delivery_tag": "delivery-1", "requeue": False}]
 
 
 def test_handle_delivery_rejects_invalid_json(db_session):

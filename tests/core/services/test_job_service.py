@@ -118,6 +118,25 @@ def test_claim_encoding_job_skips_running_job(db_session):
     assert job.attempt_count == 0
 
 
+def test_claim_encoding_job_skips_future_retry(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    job.next_run_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    db_session.commit()
+
+    context = claim_encoding_job(
+        db=db_session,
+        job_id=job.id,
+        video_id=job.video_id,
+        rendition_id=job.rendition_id,
+    )
+
+    db_session.refresh(job)
+    assert context is None
+    assert job.status == ProcessingStatus.pending
+    assert job.attempt_count == 0
+
+
 def test_mark_encoding_job_succeeded_updates_rendition(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
@@ -203,6 +222,10 @@ def test_mark_encoding_job_failed_returns_retry_decision(db_session):
     assert job.error == "ffmpeg failed"
     assert job.worker_id is None
     assert job.heartbeat_at is None
+    assert job.next_run_at is not None
+    assert job.next_run_at > job.finished_at
+    assert job.outbox_message is not None
+    assert job.outbox_message.status == OutboxStatus.pending
 
 
 def test_mark_encoding_job_failed_marks_terminal_after_max_attempts(db_session):
@@ -221,6 +244,7 @@ def test_mark_encoding_job_failed_marks_terminal_after_max_attempts(db_session):
     assert job.rendition.video.status == ProcessingStatus.failed
     assert job.worker_id is None
     assert job.heartbeat_at is None
+    assert job.next_run_at is None
 
 
 def test_reap_stale_encoding_jobs_resets_retryable_job(db_session):
@@ -247,6 +271,7 @@ def test_reap_stale_encoding_jobs_resets_retryable_job(db_session):
     assert job.rendition.status == ProcessingStatus.pending
     assert job.worker_id is None
     assert job.heartbeat_at is None
+    assert job.next_run_at is not None
     assert job.error == "encoding job heartbeat timed out"
     assert job.outbox_message is not None
     assert job.outbox_message.status == OutboxStatus.pending

@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from core.models.outbox import OutboxMessage
 from core.models.enums import OutboxStatus
 from core.queue.messages import ENCODING_EXCHANGE, ENCODING_ROUTING_KEY
@@ -97,6 +99,36 @@ def test_publish_pending_outbox_messages_can_publish_specific_rows(db_session):
     assert outbox_messages[1].status == OutboxStatus.pending
     assert len(publisher.messages) == 1
     assert publisher.messages[0][0].job_id == jobs[0].id
+
+
+def test_publish_pending_outbox_messages_skips_future_retry_jobs(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    future_job = video.renditions[0].jobs[0]
+    ready_job = video.renditions[1].jobs[0]
+    future_job.next_run_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    outbox_messages = [
+        OutboxMessage(
+            job_id=job.id,
+            video_id=job.video_id,
+            rendition_id=job.rendition_id,
+            exchange=ENCODING_EXCHANGE,
+            routing_key=ENCODING_ROUTING_KEY,
+            status=OutboxStatus.pending,
+        )
+        for job in [future_job, ready_job]
+    ]
+    db_session.add_all(outbox_messages)
+    db_session.commit()
+
+    publisher = FakeOutboxMessagePublisher()
+    published_count = publish_pending_outbox_messages(db_session, publisher)
+
+    for outbox_message in outbox_messages:
+        db_session.refresh(outbox_message)
+    assert published_count == 1
+    assert outbox_messages[0].status == OutboxStatus.pending
+    assert outbox_messages[1].status == OutboxStatus.published
+    assert [message[0].job_id for message in publisher.messages] == [ready_job.id]
 
 
 def test_publish_pending_outbox_messages_records_session_failures(db_session):

@@ -246,8 +246,8 @@ def process_encoding_message(
                 exc,
             )
             if should_retry:
-                return WorkerMessageAction.requeue
-            return WorkerMessageAction.ack
+                return WorkerMessageAction.ack
+            return WorkerMessageAction.reject
     finally:
         heartbeat.stop()
 

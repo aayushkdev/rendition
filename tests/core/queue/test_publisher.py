@@ -2,6 +2,8 @@ import pytest
 from uuid import UUID
 
 from core.queue.messages import (
+    ENCODING_DEAD_LETTER_EXCHANGE,
+    ENCODING_DEAD_LETTER_ROUTING_KEY,
     ENCODING_EXCHANGE,
     ENCODING_ROUTING_KEY,
     EncodingJobMessage,
@@ -29,7 +31,34 @@ def test_setup_encoding_topology_declares_exchange_queue_and_binding():
                 "durable": True,
             },
         ),
-        ("queue_declare", {"queue": "jobs.encode", "durable": True}),
+        (
+            "exchange_declare",
+            {
+                "exchange": ENCODING_DEAD_LETTER_EXCHANGE,
+                "exchange_type": "direct",
+                "durable": True,
+            },
+        ),
+        ("queue_declare", {"queue": "jobs.encode.dlq", "durable": True}),
+        (
+            "queue_bind",
+            {
+                "queue": "jobs.encode.dlq",
+                "exchange": ENCODING_DEAD_LETTER_EXCHANGE,
+                "routing_key": ENCODING_DEAD_LETTER_ROUTING_KEY,
+            },
+        ),
+        (
+            "queue_declare",
+            {
+                "queue": "jobs.encode",
+                "durable": True,
+                "arguments": {
+                    "x-dead-letter-exchange": ENCODING_DEAD_LETTER_EXCHANGE,
+                    "x-dead-letter-routing-key": ENCODING_DEAD_LETTER_ROUTING_KEY,
+                },
+            },
+        ),
         (
             "queue_bind",
             {
@@ -57,6 +86,9 @@ def test_rabbitmq_publisher_session_sets_up_topology_and_closes(monkeypatch):
     assert connection.closed is True
     assert [call[0] for call in channel.calls] == [
         "exchange_declare",
+        "exchange_declare",
+        "queue_declare",
+        "queue_bind",
         "queue_declare",
         "queue_bind",
     ]
