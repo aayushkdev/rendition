@@ -248,8 +248,10 @@ class FakeEncodingProcessor:
         self.error = error
         self.contexts = []
 
-    def process(self, context):
+    def process(self, context, is_cancelled=None):
         self.contexts.append(context)
+        if is_cancelled is not None and is_cancelled():
+            raise RuntimeError("cancelled")
         if self.error is not None:
             raise self.error
         return self.result

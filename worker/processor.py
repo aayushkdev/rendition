@@ -1,6 +1,7 @@
 from enum import Enum
 import logging
 import threading
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -57,7 +58,15 @@ class EncodingProcessorResult:
 
 
 class EncodingProcessor(Protocol):
-    def process(self, context: EncodingJobContext) -> EncodingProcessorResult: ...
+    def process(
+        self,
+        context: EncodingJobContext,
+        is_cancelled: Callable[[], bool] | None = None,
+    ) -> EncodingProcessorResult: ...
+
+
+class EncodingJobOwnershipLost(RuntimeError):
+    pass
 
 
 SessionScope = Callable[[], AbstractContextManager[Session]]
@@ -125,7 +134,11 @@ class FfmpegEncodingProcessor:
         self._prober = prober or VideoProber()
         self._temp_root = temp_root or Path(settings.WORKER_TEMP_ROOT)
 
-    def process(self, context: EncodingJobContext) -> EncodingProcessorResult:
+    def process(
+        self,
+        context: EncodingJobContext,
+        is_cancelled: Callable[[], bool] | None = None,
+    ) -> EncodingProcessorResult:
         self._temp_root.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(
             prefix=f"rendition-{context.job_id}-",
@@ -135,7 +148,9 @@ class FfmpegEncodingProcessor:
             input_path = job_dir / (context.source_filename or "source")
             output_dir = job_dir / "hls"
 
+            _raise_if_cancelled(is_cancelled)
             self._storage.download_file(context.source, str(input_path))
+            _raise_if_cancelled(is_cancelled)
             source_metadata = self._prober.probe(input_path)
             preset = get_hls_preset(context.resolution)
             if not is_hls_preset_applicable(preset, source_metadata):
@@ -147,13 +162,19 @@ class FfmpegEncodingProcessor:
                     ),
                 )
 
+            _raise_if_cancelled(is_cancelled)
             self._encoder.encode(
                 input_path=input_path,
                 output_dir=output_dir,
                 resolution=context.resolution,
             )
+            _raise_if_cancelled(is_cancelled)
             return EncodingProcessorResult(
-                output_path=self._upload_hls_outputs(context, output_dir),
+                output_path=self._upload_hls_outputs(
+                    context,
+                    output_dir,
+                    is_cancelled=is_cancelled,
+                ),
                 source_metadata=source_metadata,
             )
 
@@ -161,12 +182,14 @@ class FfmpegEncodingProcessor:
         self,
         context: EncodingJobContext,
         output_dir: Path,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> str:
         segment_paths = sorted((output_dir / "segments").glob("*.ts"))
         if not segment_paths:
             raise RuntimeError("HLS encoder did not create any segments")
 
         for segment_path in segment_paths:
+            _raise_if_cancelled(is_cancelled)
             segment_key = build_hls_segment_key(
                 context.video_id,
                 context.resolution,
@@ -181,6 +204,7 @@ class FfmpegEncodingProcessor:
 
         playlist_path = output_dir / "index.m3u8"
         playlist_key = build_hls_playlist_key(context.video_id, context.resolution)
+        _raise_if_cancelled(is_cancelled)
         self._storage.upload_file(
             local_path=str(playlist_path),
             key=playlist_key,
@@ -189,6 +213,54 @@ class FfmpegEncodingProcessor:
         )
 
         return playlist_key
+
+
+def _raise_if_cancelled(is_cancelled: Callable[[], bool] | None) -> None:
+    if is_cancelled is not None and is_cancelled():
+        raise EncodingJobOwnershipLost("encoding job ownership was lost")
+
+
+def _build_ownership_lost_checker(
+    session_scope: SessionScope,
+    heartbeat: JobHeartbeat,
+    context: EncodingJobContext,
+) -> Callable[[], bool]:
+    last_checked_at = 0.0
+    lost_ownership = False
+    min_check_interval_seconds = 5.0
+
+    def is_lost() -> bool:
+        nonlocal last_checked_at, lost_ownership
+        if lost_ownership or heartbeat.lost_ownership:
+            return True
+
+        now = time.monotonic()
+        if now - last_checked_at < min_check_interval_seconds:
+            return False
+        last_checked_at = now
+
+        try:
+            with session_scope() as db:
+                still_owned = heartbeat_encoding_job(
+                    db=db,
+                    job_id=context.job_id,
+                    worker_id=context.worker_id,
+                )
+        except Exception:
+            logger.exception(
+                "encoding job ownership check failed job_id=%s worker_id=%s",
+                context.job_id,
+                context.worker_id,
+            )
+            return False
+
+        if not still_owned:
+            lost_ownership = True
+            return True
+        return False
+
+    return is_lost
+
 
 def process_encoding_message(
     session_scope: SessionScope,
@@ -219,9 +291,19 @@ def process_encoding_message(
         interval_seconds=settings.WORKER_HEARTBEAT_INTERVAL_SECONDS,
     )
     heartbeat.start()
+    is_cancelled = _build_ownership_lost_checker(
+        session_scope=session_scope,
+        heartbeat=heartbeat,
+        context=context,
+    )
     try:
         try:
-            result = processor.process(context)
+            result = processor.process(
+                context,
+                is_cancelled=is_cancelled,
+            )
+        except EncodingJobOwnershipLost:
+            return WorkerMessageAction.ack
         except Exception as exc:
             with session_scope() as db:
                 should_retry = mark_encoding_job_failed(

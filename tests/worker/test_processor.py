@@ -6,6 +6,7 @@ from core.services.video_service import ingest_video
 from tests.fakes import FakeEncodingProcessor, FakeObjectStorage
 from worker.processor import EncodingProcessorResult
 from worker.processor import (
+    EncodingJobOwnershipLost,
     WorkerMessageAction,
     process_encoding_message,
 )
@@ -148,3 +149,37 @@ def test_process_encoding_message_rejects_mismatched_job(db_session):
     )
 
     assert action == WorkerMessageAction.reject
+
+
+def test_process_encoding_message_acks_without_failing_after_ownership_loss(
+    db_session,
+):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+
+    @contextmanager
+    def session_scope():
+        yield db_session
+
+    class OwnershipLostProcessor:
+        def process(self, context, is_cancelled=None):
+            job.status = ProcessingStatus.pending
+            job.worker_id = None
+            db_session.commit()
+            assert is_cancelled is not None
+            assert is_cancelled()
+            raise EncodingJobOwnershipLost("lost ownership")
+
+    action = process_encoding_message(
+        session_scope=session_scope,
+        message=EncodingJobMessage(
+            job_id=job.id,
+            video_id=job.video_id,
+            rendition_id=job.rendition_id,
+        ),
+        processor=OwnershipLostProcessor(),
+    )
+
+    db_session.refresh(job)
+    assert action == WorkerMessageAction.ack
+    assert job.status == ProcessingStatus.pending

@@ -5,11 +5,12 @@ import pytest
 from core.encoding import VideoSourceMetadata
 from core.services.job_service import EncodingJobContext
 from tests.fakes import FakeHlsEncoder, FakeObjectStorage, FakeVideoProber
-from worker.processor import FfmpegEncodingProcessor
+from worker.processor import EncodingJobOwnershipLost, FfmpegEncodingProcessor
 
 VIDEO_ID = UUID("11111111-1111-1111-1111-111111111111")
 JOB_ID = UUID("22222222-2222-2222-2222-222222222222")
 RENDITION_ID = UUID("33333333-3333-3333-3333-333333333333")
+
 
 def encoding_context() -> EncodingJobContext:
     return EncodingJobContext(
@@ -23,6 +24,7 @@ def encoding_context() -> EncodingJobContext:
         bitrate=2_800_000,
         attempt_count=1,
         max_attempts=3,
+        worker_id="test-worker",
     )
 
 
@@ -56,10 +58,7 @@ def test_ffmpeg_processor_uploads_segments_then_playlist(tmp_path):
         "hls/11111111-1111-1111-1111-111111111111/720p/index.m3u8",
     ]
     assert storage.uploaded_files[0]["content_type"] == "video/mp2t"
-    assert (
-        storage.uploaded_files[-1]["content_type"]
-        == "application/vnd.apple.mpegurl"
-    )
+    assert storage.uploaded_files[-1]["content_type"] == "application/vnd.apple.mpegurl"
     assert list(tmp_path.iterdir()) == []
 
 
@@ -99,5 +98,26 @@ def test_ffmpeg_processor_skips_inapplicable_rendition(tmp_path):
     assert result.source_metadata == metadata
     assert result.skipped_reason == "720p is not applicable for 854x480 source"
     assert encoder.calls == []
+    assert storage.uploaded_files == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ffmpeg_processor_does_not_upload_after_cancellation(tmp_path):
+    storage = FakeObjectStorage()
+    encoder = FakeHlsEncoder()
+    processor = FfmpegEncodingProcessor(
+        storage=storage,
+        encoder=encoder,
+        prober=FakeVideoProber(),
+        temp_root=tmp_path,
+    )
+
+    def is_cancelled():
+        return bool(encoder.calls)
+
+    with pytest.raises(EncodingJobOwnershipLost):
+        processor.process(encoding_context(), is_cancelled=is_cancelled)
+
+    assert encoder.calls
     assert storage.uploaded_files == []
     assert list(tmp_path.iterdir()) == []
