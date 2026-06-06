@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -30,6 +31,11 @@ class Job(Base):
         UniqueConstraint("rendition_id", name="uq_jobs_rendition_id"),
         Index("ix_jobs_status_created_at", "status", "created_at"),
         Index("ix_jobs_status_started_at", "status", "started_at"),
+        Index(
+            "ix_jobs_running_heartbeat_at",
+            "heartbeat_at",
+            postgresql_where=text("status = 'running'"),
+        ),
         Index("ix_jobs_video_id", "video_id"),
         Index("ix_jobs_rendition_id", "rendition_id"),
     )
@@ -61,6 +67,7 @@ class Job(Base):
     error: Mapped[str | None] = mapped_column(String, nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    worker_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -81,6 +88,11 @@ class Job(Base):
     )
 
     finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )

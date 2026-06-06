@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     WORKER_QUEUE_NAME: str = "jobs.encode"
     WORKER_PREFETCH_COUNT: int = Field(default=1, ge=1)
     WORKER_TEMP_ROOT: str = "/tmp/rendition"
+    WORKER_HEARTBEAT_INTERVAL_SECONDS: int = Field(default=60, ge=1)
+    JOB_REAPER_INTERVAL_SECONDS: int = Field(default=120, ge=1)
+    JOB_STALE_TIMEOUT_SECONDS: int = Field(default=300, ge=1)
 
     ENVIRONMENT: str = "local"
 
