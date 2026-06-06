@@ -36,6 +36,7 @@ class EncodingJobContext:
     bitrate: int
     attempt_count: int
     max_attempts: int
+    worker_id: str
 
 
 def _get_job_for_update(db: Session, job_id: UUID) -> Job | None:
@@ -96,15 +97,19 @@ def _has_exhausted_attempts(job: Job) -> bool:
 
 def _mark_job_attempts_exhausted(job: Job) -> None:
     job.status = ProcessingStatus.failed
+    job.worker_id = None
+    job.heartbeat_at = None
     job.rendition.status = ProcessingStatus.failed
     job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
     job.finished_at = datetime.now(timezone.utc)
     job.error = "encoding job exceeded maximum attempts"
 
 
-def _mark_job_running(job: Job) -> None:
+def _mark_job_running(job: Job, worker_id: str) -> None:
     now = datetime.now(timezone.utc)
     job.status = ProcessingStatus.running
+    job.worker_id = worker_id
+    job.heartbeat_at = now
     job.attempt_count += 1
     job.started_at = now
     job.finished_at = None
@@ -126,6 +131,7 @@ def _build_encoding_context(job: Job) -> EncodingJobContext:
         bitrate=job.rendition.bitrate,
         attempt_count=job.attempt_count,
         max_attempts=job.max_attempts,
+        worker_id=job.worker_id or "",
     )
 
 
@@ -146,6 +152,7 @@ def claim_encoding_job(
     job_id: UUID,
     video_id: UUID,
     rendition_id: UUID,
+    worker_id: str = "local-worker",
 ) -> EncodingJobContext | None:
     job = _get_job_for_update(db, job_id)
 
@@ -163,26 +170,60 @@ def claim_encoding_job(
         db.commit()
         return None
 
-    _mark_job_running(job)
+    _mark_job_running(job, worker_id)
     context = _build_encoding_context(job)
     db.commit()
     return context
 
 
-def mark_encoding_job_succeeded(
+def heartbeat_encoding_job(
     db: Session,
     job_id: UUID,
-    output_path: str | None = None,
-    source_metadata: VideoSourceMetadata | None = None,
-    storage: ObjectStorage | None = None,
-) -> None:
+    worker_id: str,
+) -> bool:
     job = _get_job_for_update(db, job_id)
 
     if job is None:
         raise EncodingJobNotFoundError("encoding job not found")
 
+    if job.status != ProcessingStatus.running or job.worker_id != worker_id:
+        db.commit()
+        return False
+
+    job.heartbeat_at = datetime.now(timezone.utc)
+    db.commit()
+    return True
+
+
+def _owns_running_job(job: Job, worker_id: str) -> bool:
+    return job.status == ProcessingStatus.running and job.worker_id == worker_id
+
+
+def _clear_job_owner(job: Job) -> None:
+    job.worker_id = None
+    job.heartbeat_at = None
+
+
+def mark_encoding_job_succeeded(
+    db: Session,
+    job_id: UUID,
+    worker_id: str = "local-worker",
+    output_path: str | None = None,
+    source_metadata: VideoSourceMetadata | None = None,
+    storage: ObjectStorage | None = None,
+) -> bool:
+    job = _get_job_for_update(db, job_id)
+
+    if job is None:
+        raise EncodingJobNotFoundError("encoding job not found")
+
+    if not _owns_running_job(job, worker_id):
+        db.commit()
+        return False
+
     now = datetime.now(timezone.utc)
     job.status = ProcessingStatus.done
+    _clear_job_owner(job)
     job.finished_at = now
     job.error = None
     job.rendition.status = ProcessingStatus.done
@@ -196,22 +237,29 @@ def mark_encoding_job_succeeded(
     publish_master_playlist_if_ready(job.rendition.video, storage=storage)
 
     db.commit()
+    return True
 
 
 def mark_encoding_job_skipped(
     db: Session,
     job_id: UUID,
     reason: str,
+    worker_id: str = "local-worker",
     source_metadata: VideoSourceMetadata | None = None,
     storage: ObjectStorage | None = None,
-) -> None:
+) -> bool:
     job = _get_job_for_update(db, job_id)
 
     if job is None:
         raise EncodingJobNotFoundError("encoding job not found")
 
+    if not _owns_running_job(job, worker_id):
+        db.commit()
+        return False
+
     now = datetime.now(timezone.utc)
     job.status = ProcessingStatus.done
+    _clear_job_owner(job)
     job.finished_at = now
     job.error = reason
     job.rendition.status = ProcessingStatus.skipped
@@ -223,23 +271,30 @@ def mark_encoding_job_skipped(
     publish_master_playlist_if_ready(job.rendition.video, storage=storage)
 
     db.commit()
+    return True
 
 
 def mark_encoding_job_failed(
     db: Session,
     job_id: UUID,
     error: str,
+    worker_id: str = "local-worker",
     storage: ObjectStorage | None = None,
-) -> bool:
+) -> bool | None:
     job = _get_job_for_update(db, job_id)
 
     if job is None:
         raise EncodingJobNotFoundError("encoding job not found")
 
+    if not _owns_running_job(job, worker_id):
+        db.commit()
+        return None
+
     should_retry = job.attempt_count < job.max_attempts
     job.error = error
     job.finished_at = datetime.now(timezone.utc)
     job.status = ProcessingStatus.pending if should_retry else ProcessingStatus.failed
+    _clear_job_owner(job)
     job.rendition.status = (
         ProcessingStatus.pending if should_retry else ProcessingStatus.failed
     )

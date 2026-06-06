@@ -9,6 +9,7 @@ from core.services.job_service import (
     EncodingJobMessageMismatchError,
     claim_encoding_job,
     derive_video_status,
+    heartbeat_encoding_job,
     mark_encoding_job_failed,
     mark_encoding_job_skipped,
     mark_encoding_job_succeeded,
@@ -37,6 +38,47 @@ def test_claim_encoding_job_marks_job_running(db_session):
     assert job.rendition.video.status == ProcessingStatus.running
     assert job.attempt_count == 1
     assert job.started_at is not None
+    assert job.worker_id == "local-worker"
+    assert job.heartbeat_at is not None
+
+
+def test_heartbeat_encoding_job_updates_owned_running_job(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    claim_encoding_job(
+        db_session,
+        job.id,
+        job.video_id,
+        job.rendition_id,
+        worker_id="worker-a",
+    )
+    first_heartbeat = job.heartbeat_at
+
+    updated = heartbeat_encoding_job(db_session, job.id, worker_id="worker-a")
+
+    db_session.refresh(job)
+    assert updated is True
+    assert job.heartbeat_at is not None
+    assert job.heartbeat_at >= first_heartbeat
+
+
+def test_heartbeat_encoding_job_rejects_wrong_owner(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    claim_encoding_job(
+        db_session,
+        job.id,
+        job.video_id,
+        job.rendition_id,
+        worker_id="worker-a",
+    )
+    first_heartbeat = job.heartbeat_at
+
+    updated = heartbeat_encoding_job(db_session, job.id, worker_id="worker-b")
+
+    db_session.refresh(job)
+    assert updated is False
+    assert job.heartbeat_at == first_heartbeat
 
 
 def test_claim_encoding_job_rejects_mismatched_message(db_session):
@@ -161,6 +203,7 @@ def test_mark_encoding_job_failed_returns_retry_decision(db_session):
 def test_mark_encoding_job_failed_marks_terminal_after_max_attempts(db_session):
     video = ingest_video(db_session, "s3://input/video.mp4")
     job = video.renditions[0].jobs[0]
+    claim_encoding_job(db_session, job.id, job.video_id, job.rendition_id)
     job.attempt_count = job.max_attempts
     db_session.commit()
 
@@ -202,6 +245,13 @@ def test_failed_rendition_keeps_completed_renditions_partially_available(db_sess
     failing_job = video.renditions[1].jobs[0]
     done_rendition.status = ProcessingStatus.done
     done_rendition.jobs[0].status = ProcessingStatus.done
+    db_session.commit()
+    claim_encoding_job(
+        db_session,
+        failing_job.id,
+        failing_job.video_id,
+        failing_job.rendition_id,
+    )
     failing_job.attempt_count = failing_job.max_attempts
     db_session.commit()
 
@@ -302,6 +352,10 @@ def test_terminal_partial_generates_master_playlist_for_successful_renditions(
     done_rendition = video.renditions[0]
     failing_rendition = video.renditions[1]
     skipped_rendition = video.renditions[2]
+    for pending_rendition in video.renditions[3:]:
+        pending_rendition.status = ProcessingStatus.skipped
+        pending_rendition.jobs[0].status = ProcessingStatus.done
+    db_session.commit()
 
     claim_encoding_job(
         db_session,

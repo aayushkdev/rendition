@@ -1,5 +1,6 @@
 from enum import Enum
 import logging
+import threading
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from core.services.job_service import (
     EncodingJobContext,
     EncodingJobError,
     claim_encoding_job,
+    heartbeat_encoding_job,
     mark_encoding_job_failed,
     mark_encoding_job_skipped,
     mark_encoding_job_succeeded,
@@ -56,6 +58,58 @@ class EncodingProcessorResult:
 
 class EncodingProcessor(Protocol):
     def process(self, context: EncodingJobContext) -> EncodingProcessorResult: ...
+
+
+SessionScope = Callable[[], AbstractContextManager[Session]]
+
+
+class JobHeartbeat:
+    def __init__(
+        self,
+        session_scope: SessionScope,
+        job_id,
+        worker_id: str,
+        interval_seconds: int,
+    ) -> None:
+        self._session_scope = session_scope
+        self._job_id = job_id
+        self._worker_id = worker_id
+        self._interval_seconds = interval_seconds
+        self._stop_event = threading.Event()
+        self._lost_ownership = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    @property
+    def lost_ownership(self) -> bool:
+        return self._lost_ownership
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=5)
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(self._interval_seconds):
+            try:
+                with self._session_scope() as db:
+                    still_owned = heartbeat_encoding_job(
+                        db=db,
+                        job_id=self._job_id,
+                        worker_id=self._worker_id,
+                    )
+            except Exception:
+                logger.exception(
+                    "encoding job heartbeat failed job_id=%s worker_id=%s",
+                    self._job_id,
+                    self._worker_id,
+                )
+                continue
+
+            if not still_owned:
+                self._lost_ownership = True
+                self._stop_event.set()
 
 
 class FfmpegEncodingProcessor:
@@ -136,15 +190,12 @@ class FfmpegEncodingProcessor:
 
         return playlist_key
 
-
-SessionScope = Callable[[], AbstractContextManager[Session]]
-
-
 def process_encoding_message(
     session_scope: SessionScope,
     message: EncodingJobMessage,
     processor: EncodingProcessor,
     storage: ObjectStorage | None = None,
+    worker_id: str = "local-worker",
 ) -> WorkerMessageAction:
     try:
         with session_scope() as db:
@@ -153,6 +204,7 @@ def process_encoding_message(
                 job_id=message.job_id,
                 video_id=message.video_id,
                 rendition_id=message.rendition_id,
+                worker_id=worker_id,
             )
     except EncodingJobError:
         return WorkerMessageAction.reject
@@ -160,46 +212,68 @@ def process_encoding_message(
     if context is None:
         return WorkerMessageAction.ack
 
+    heartbeat = JobHeartbeat(
+        session_scope=session_scope,
+        job_id=context.job_id,
+        worker_id=context.worker_id,
+        interval_seconds=settings.WORKER_HEARTBEAT_INTERVAL_SECONDS,
+    )
+    heartbeat.start()
     try:
-        result = processor.process(context)
-    except Exception as exc:
-        with session_scope() as db:
-            should_retry = mark_encoding_job_failed(
-                db,
+        try:
+            result = processor.process(context)
+        except Exception as exc:
+            with session_scope() as db:
+                should_retry = mark_encoding_job_failed(
+                    db,
+                    context.job_id,
+                    str(exc),
+                    worker_id=context.worker_id,
+                    storage=storage,
+                )
+            if should_retry is None:
+                return WorkerMessageAction.ack
+
+            logger.exception(
+                "encoding job failed job_id=%s video_id=%s rendition_id=%s resolution=%s attempt=%s/%s retry=%s error=%s",
                 context.job_id,
-                str(exc),
-                storage=storage,
+                context.video_id,
+                context.rendition_id,
+                context.resolution,
+                context.attempt_count + 1,
+                context.max_attempts,
+                should_retry,
+                exc,
             )
-        logger.exception(
-            "encoding job failed job_id=%s video_id=%s rendition_id=%s resolution=%s attempt=%s/%s retry=%s error=%s",
-            context.job_id,
-            context.video_id,
-            context.rendition_id,
-            context.resolution,
-            context.attempt_count + 1,
-            context.max_attempts,
-            should_retry,
-            exc,
-        )
-        if should_retry:
-            return WorkerMessageAction.requeue
+            if should_retry:
+                return WorkerMessageAction.requeue
+            return WorkerMessageAction.ack
+    finally:
+        heartbeat.stop()
+
+    if heartbeat.lost_ownership:
         return WorkerMessageAction.ack
 
     with session_scope() as db:
         if result.skipped_reason is not None:
-            mark_encoding_job_skipped(
+            updated = mark_encoding_job_skipped(
                 db,
                 context.job_id,
                 result.skipped_reason,
+                worker_id=context.worker_id,
                 source_metadata=result.source_metadata,
                 storage=storage,
             )
         else:
-            mark_encoding_job_succeeded(
+            updated = mark_encoding_job_succeeded(
                 db,
                 context.job_id,
+                worker_id=context.worker_id,
                 output_path=result.output_path,
                 source_metadata=result.source_metadata,
                 storage=storage,
             )
+
+    if not updated:
+        return WorkerMessageAction.ack
     return WorkerMessageAction.ack

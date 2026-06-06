@@ -1,6 +1,9 @@
 import logging
+import os
 import signal
+import socket
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -62,6 +65,7 @@ def handle_delivery(
     body: bytes,
     session_scope: SessionScope,
     processor: EncodingProcessor,
+    worker_id: str = "local-worker",
 ) -> None:
     try:
         message = EncodingJobMessage.model_validate_json(body)
@@ -75,6 +79,7 @@ def handle_delivery(
             session_scope=session_scope,
             message=message,
             processor=processor,
+            worker_id=worker_id,
         )
     except Exception:
         logger.exception(
@@ -95,6 +100,7 @@ def handle_delivery(
 def main() -> None:
     stopping = False
     processor = FfmpegEncodingProcessor()
+    worker_id = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4()}"
 
     def stop(_signum, _frame) -> None:
         nonlocal stopping
@@ -116,6 +122,7 @@ def main() -> None:
             body=body,
             session_scope=session_scope,
             processor=processor,
+            worker_id=worker_id,
         ),
         auto_ack=False,
     )
@@ -125,6 +132,7 @@ def main() -> None:
         extra={
             "queue": settings.WORKER_QUEUE_NAME,
             "prefetch_count": settings.WORKER_PREFETCH_COUNT,
+            "worker_id": worker_id,
         },
     )
     try:
