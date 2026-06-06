@@ -73,6 +73,9 @@ def is_hls_preset_applicable(
     metadata: VideoSourceMetadata,
     bitrate_headroom: float = 1.25,
 ) -> bool:
+    if preset.resolution == FALLBACK_HLS_RESOLUTION:
+        return True
+
     if preset.width > metadata.width or preset.height > metadata.height:
         return False
 

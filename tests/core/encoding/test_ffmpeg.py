@@ -65,6 +65,18 @@ def test_hls_preset_applicability_uses_dimensions_and_soft_bitrate():
     )
 
 
+def test_fallback_hls_preset_is_always_applicable():
+    assert is_hls_preset_applicable(
+        get_hls_preset("144p"),
+        VideoSourceMetadata(
+            width=192,
+            height=144,
+            bitrate=80_000,
+            duration_seconds=30.0,
+        ),
+    )
+
+
 def test_parse_ffprobe_output_uses_stream_and_format_metadata():
     metadata = parse_ffprobe_output("""
         {

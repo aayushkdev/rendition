@@ -12,7 +12,11 @@ JOB_ID = UUID("22222222-2222-2222-2222-222222222222")
 RENDITION_ID = UUID("33333333-3333-3333-3333-333333333333")
 
 
-def encoding_context() -> EncodingJobContext:
+def encoding_context(
+    *,
+    resolution: str = "720p",
+    bitrate: int = 2_800_000,
+) -> EncodingJobContext:
     return EncodingJobContext(
         job_id=JOB_ID,
         video_id=VIDEO_ID,
@@ -20,8 +24,8 @@ def encoding_context() -> EncodingJobContext:
         source="source/video/original.mp4",
         source_bucket="test-bucket",
         source_filename="original.mp4",
-        resolution="720p",
-        bitrate=2_800_000,
+        resolution=resolution,
+        bitrate=bitrate,
         attempt_count=1,
         max_attempts=3,
         worker_id="test-worker",
@@ -99,6 +103,60 @@ def test_ffmpeg_processor_skips_inapplicable_rendition(tmp_path):
     assert result.skipped_reason == "720p is not applicable for 854x480 source"
     assert encoder.calls == []
     assert storage.uploaded_files == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ffmpeg_processor_encodes_fallback_rendition_for_tiny_source(tmp_path):
+    storage = FakeObjectStorage()
+    encoder = FakeHlsEncoder()
+    metadata = VideoSourceMetadata(
+        width=192,
+        height=144,
+        bitrate=80_000,
+        duration_seconds=30.0,
+    )
+    processor = FfmpegEncodingProcessor(
+        storage=storage,
+        encoder=encoder,
+        prober=FakeVideoProber(metadata),
+        temp_root=tmp_path,
+    )
+
+    result = processor.process(encoding_context(resolution="144p", bitrate=150_000))
+
+    assert result.output_path == (
+        "hls/11111111-1111-1111-1111-111111111111/144p/index.m3u8"
+    )
+    assert result.skipped_reason is None
+    assert encoder.calls[0]["resolution"] == "144p"
+    assert storage.uploaded_files
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ffmpeg_processor_encodes_fallback_for_low_bitrate_432p_source(tmp_path):
+    storage = FakeObjectStorage()
+    encoder = FakeHlsEncoder()
+    metadata = VideoSourceMetadata(
+        width=768,
+        height=432,
+        bitrate=47_000,
+        duration_seconds=615.4,
+    )
+    processor = FfmpegEncodingProcessor(
+        storage=storage,
+        encoder=encoder,
+        prober=FakeVideoProber(metadata),
+        temp_root=tmp_path,
+    )
+
+    result = processor.process(encoding_context(resolution="144p", bitrate=150_000))
+
+    assert result.output_path == (
+        "hls/11111111-1111-1111-1111-111111111111/144p/index.m3u8"
+    )
+    assert result.skipped_reason is None
+    assert encoder.calls[0]["resolution"] == "144p"
+    assert storage.uploaded_files
     assert list(tmp_path.iterdir()) == []
 
 
