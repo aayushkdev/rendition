@@ -17,17 +17,24 @@ outbox publisher, and a Next.js frontend.
 - One encoding job per target rendition.
 - RabbitMQ job publishing through an outbox so jobs are not lost if RabbitMQ is
   temporarily unavailable.
-- Worker-side job claiming with manual ack/nack behavior.
+- Worker-side job claiming with ownership, heartbeats, and manual ack/nack
+  behavior.
+- Stale job recovery through a reaper that returns abandoned running jobs to the
+  retry flow.
+- Bounded job retries with backoff and RabbitMQ dead-letter routing for terminal
+  worker failures.
 - Source probing with `ffprobe` for width, height, bitrate, and duration.
-- HLS encoding with `ffmpeg` for 1080p, 720p, and 480p presets.
+- HLS encoding with `ffmpeg` for 1080p, 720p, 480p, 360p, 240p, and 144p
+  presets.
 - Source-aware rendition skipping. For example, a 720p source will not create a
   1080p output.
 - HLS segment and rendition playlist upload to object storage.
 - Master playlist generation at `hls/{video_id}/master.m3u8`.
-- Partial playback support when at least one rendition succeeds.
+- API-backed playback URLs so the frontend does not construct object-storage
+  URLs directly.
 - Request IDs and consistent API error responses.
-- A dashboard UI for uploads, progress, cancellation, retry, and uploaded video
-  status.
+- A dashboard UI for uploads, progress, cancellation, retry, uploaded video
+  status, and HLS playback for completed videos.
 
 ## Architecture
 
@@ -43,6 +50,7 @@ flowchart LR
   rabbitmq --> worker[Encoding Worker]
   worker --> postgres
   worker --> storage
+  reaper[Job Reaper] --> postgres
 ```
 
 ### Services
@@ -50,6 +58,7 @@ flowchart LR
 - `frontend`: Next.js app for upload testing and video/dashboard views.
 - `api`: FastAPI service exposing health checks, upload APIs, and video APIs.
 - `worker`: consumes encoding jobs and runs `ffprobe`/`ffmpeg`.
+- `reaper`: marks stale running jobs retryable when workers stop heartbeating.
 - `outbox`: periodically publishes pending queue messages from PostgreSQL to
   RabbitMQ.
 - `postgres`: application database.
@@ -71,14 +80,22 @@ flowchart LR
 7. The API creates renditions, jobs, and outbox messages in the database.
 8. The API attempts immediate queue publishing; the outbox service retries any
    pending messages every 30 seconds.
-9. The worker claims a pending job, downloads the source video, and probes it.
+9. The worker claims a pending job, records ownership, starts heartbeating, then
+   downloads the source video and probes it.
 10. If the requested rendition is not valid for the source, the rendition is
     marked `skipped`.
 11. Valid renditions are encoded to HLS in a temporary per-job directory.
-12. The worker uploads HLS segments and the rendition playlist.
-13. Once all rendition work is terminal, a master playlist is generated and
+12. Before uploading HLS output, the worker verifies it still owns the job so a
+    stale worker cannot overwrite files after another worker reclaimed the job.
+13. The worker uploads HLS segments and the rendition playlist.
+14. Failed jobs are retried with backoff until attempts are exhausted.
+15. The reaper moves stale running jobs back into the retry flow after the
+    heartbeat timeout.
+16. Once all rendition work is terminal, a master playlist is generated and
     uploaded.
-14. `videos.playback_path` points at the master playlist.
+17. `videos.playback_path` points at the master playlist.
+18. The frontend asks the API for playback metadata and uses the returned
+    playlist URL.
 
 ## Local Development
 
@@ -90,6 +107,7 @@ The local setup runs with:
 - RabbitMQ
 - MinIO
 - Python encoding worker
+- Job reaper
 - Outbox publisher
 
 
@@ -127,6 +145,16 @@ Object storage: rendition / rendition-secret
 Bucket:    rendition
 ```
 
+Useful local worker defaults:
+
+```text
+Worker queue: jobs.encode
+Worker prefetch: 1
+Worker heartbeat interval: 60 seconds
+Job stale timeout: 300 seconds
+Retry backoff: 30, 120, 600 seconds
+```
+
 ## Production Deployment
 
 Use `docker-compose.prod.yml` when object storage is provided externally by AWS
@@ -157,6 +185,12 @@ STORAGE_ACCESS_KEY_ID=...
 STORAGE_SECRET_ACCESS_KEY=...
 STORAGE_BUCKET=...
 STORAGE_REGION=...
+
+WORKER_JOB_RETRY_COUNT=3
+WORKER_HEARTBEAT_INTERVAL_SECONDS=60
+JOB_REAPER_INTERVAL_SECONDS=120
+JOB_STALE_TIMEOUT_SECONDS=300
+JOB_RETRY_BACKOFF_SECONDS=30,120,600
 ```
 
 Typical production flow:
