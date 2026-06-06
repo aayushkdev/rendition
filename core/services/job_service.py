@@ -343,13 +343,14 @@ def mark_encoding_job_failed(
         db.commit()
         return None
 
+    now = datetime.now(timezone.utc)
     should_retry = job.attempt_count < job.max_attempts
     job.error = error
-    job.finished_at = datetime.now(timezone.utc)
+    job.finished_at = now
     job.status = ProcessingStatus.pending if should_retry else ProcessingStatus.failed
     _clear_job_owner(job)
     if should_retry:
-        _schedule_retry(job, job.finished_at)
+        _schedule_retry(job, now)
         _queue_job_for_publish(db, job)
     else:
         job.next_run_at = None

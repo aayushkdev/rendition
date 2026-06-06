@@ -56,6 +56,7 @@ def test_heartbeat_encoding_job_updates_owned_running_job(db_session):
         worker_id="worker-a",
     )
     first_heartbeat = job.heartbeat_at
+    assert first_heartbeat is not None
 
     updated = heartbeat_encoding_job(db_session, job.id, worker_id="worker-a")
 
@@ -223,6 +224,7 @@ def test_mark_encoding_job_failed_returns_retry_decision(db_session):
     assert job.worker_id is None
     assert job.heartbeat_at is None
     assert job.next_run_at is not None
+    assert job.finished_at is not None
     assert job.next_run_at > job.finished_at
     assert job.outbox_message is not None
     assert job.outbox_message.status == OutboxStatus.pending

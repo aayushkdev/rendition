@@ -46,8 +46,10 @@ def create_playable_video(db_session: Session, storage: FakeObjectStorage) -> Vi
             content_type="application/vnd.apple.mpegurl",
         )
 
+    playback_path = video.playback_path
+    assert playback_path is not None
     storage.upload_bytes(
-        key=video.playback_path,
+        key=playback_path,
         body=b"#EXTM3U\n",
         content_type="application/vnd.apple.mpegurl",
     )
