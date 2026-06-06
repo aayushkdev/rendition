@@ -2,12 +2,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from core.models.enums import ProcessingStatus
+from core.models.enums import OutboxStatus, ProcessingStatus
 from core.models.job import Job
+from core.models.outbox import OutboxMessage
 from core.models.rendition import Rendition
 from core.encoding import VideoSourceMetadata
+from core.queue.messages import ENCODING_EXCHANGE, ENCODING_ROUTING_KEY
 from core.services.playback_service import publish_master_playlist_if_ready
 from core.storage import ObjectStorage
 
@@ -46,6 +49,13 @@ def _get_job_for_update(db: Session, job_id: UUID) -> Job | None:
         .filter(Job.id == job_id)
         .with_for_update(of=Job)
         .one_or_none()
+    )
+
+
+def _job_query_with_state(db: Session):
+    return db.query(Job).options(
+        joinedload(Job.rendition).joinedload(Rendition.video),
+        joinedload(Job.outbox_message),
     )
 
 
@@ -204,6 +214,25 @@ def _clear_job_owner(job: Job) -> None:
     job.heartbeat_at = None
 
 
+def _queue_job_for_publish(db: Session, job: Job) -> None:
+    if job.outbox_message is None:
+        db.add(
+            OutboxMessage(
+                job_id=job.id,
+                video_id=job.video_id,
+                rendition_id=job.rendition_id,
+                exchange=ENCODING_EXCHANGE,
+                routing_key=ENCODING_ROUTING_KEY,
+                status=OutboxStatus.pending,
+            )
+        )
+        return
+
+    job.outbox_message.status = OutboxStatus.pending
+    job.outbox_message.published_at = None
+    job.outbox_message.last_error = None
+
+
 def mark_encoding_job_succeeded(
     db: Session,
     job_id: UUID,
@@ -306,3 +335,44 @@ def mark_encoding_job_failed(
 
     db.commit()
     return should_retry
+
+
+def reap_stale_encoding_jobs(
+    db: Session,
+    stale_before: datetime,
+    limit: int = 100,
+) -> int:
+    stale_jobs = (
+        _job_query_with_state(db)
+        .filter(Job.status == ProcessingStatus.running)
+        .filter(or_(Job.heartbeat_at.is_(None), Job.heartbeat_at < stale_before))
+        .order_by(Job.started_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True, of=Job)
+        .all()
+    )
+
+    if not stale_jobs:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    for job in stale_jobs:
+        should_retry = job.attempt_count < job.max_attempts
+        job.error = "encoding job heartbeat timed out"
+        job.finished_at = now
+        _clear_job_owner(job)
+
+        if should_retry:
+            job.status = ProcessingStatus.pending
+            job.rendition.status = ProcessingStatus.pending
+            job.rendition.error = job.error
+            _queue_job_for_publish(db, job)
+        else:
+            job.status = ProcessingStatus.failed
+            job.rendition.status = ProcessingStatus.failed
+            job.rendition.error = job.error
+
+        job.rendition.video.status = derive_video_status(job.rendition.video.renditions)
+
+    db.commit()
+    return len(stale_jobs)

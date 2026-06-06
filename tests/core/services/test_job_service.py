@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from core.encoding import VideoSourceMetadata
-from core.models.enums import ProcessingStatus
+from core.models.enums import OutboxStatus, ProcessingStatus
 from core.models.rendition import Rendition
 from core.services.job_service import (
     EncodingJobMessageMismatchError,
@@ -13,6 +15,7 @@ from core.services.job_service import (
     mark_encoding_job_failed,
     mark_encoding_job_skipped,
     mark_encoding_job_succeeded,
+    reap_stale_encoding_jobs,
 )
 from core.services.video_service import ingest_video
 from tests.fakes import FakeObjectStorage
@@ -198,6 +201,8 @@ def test_mark_encoding_job_failed_returns_retry_decision(db_session):
     assert job.status == ProcessingStatus.pending
     assert job.rendition.status == ProcessingStatus.pending
     assert job.error == "ffmpeg failed"
+    assert job.worker_id is None
+    assert job.heartbeat_at is None
 
 
 def test_mark_encoding_job_failed_marks_terminal_after_max_attempts(db_session):
@@ -214,6 +219,88 @@ def test_mark_encoding_job_failed_marks_terminal_after_max_attempts(db_session):
     assert job.status == ProcessingStatus.failed
     assert job.rendition.status == ProcessingStatus.failed
     assert job.rendition.video.status == ProcessingStatus.failed
+    assert job.worker_id is None
+    assert job.heartbeat_at is None
+
+
+def test_reap_stale_encoding_jobs_resets_retryable_job(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    claim_encoding_job(
+        db_session,
+        job.id,
+        job.video_id,
+        job.rendition_id,
+        worker_id="worker-a",
+    )
+    job.heartbeat_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    db_session.commit()
+
+    reaped_count = reap_stale_encoding_jobs(
+        db_session,
+        stale_before=datetime.now(timezone.utc) - timedelta(minutes=5),
+    )
+
+    db_session.refresh(job)
+    assert reaped_count == 1
+    assert job.status == ProcessingStatus.pending
+    assert job.rendition.status == ProcessingStatus.pending
+    assert job.worker_id is None
+    assert job.heartbeat_at is None
+    assert job.error == "encoding job heartbeat timed out"
+    assert job.outbox_message is not None
+    assert job.outbox_message.status == OutboxStatus.pending
+    assert job.outbox_message.published_at is None
+
+
+def test_reap_stale_encoding_jobs_ignores_fresh_heartbeat(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    claim_encoding_job(
+        db_session,
+        job.id,
+        job.video_id,
+        job.rendition_id,
+        worker_id="worker-a",
+    )
+
+    reaped_count = reap_stale_encoding_jobs(
+        db_session,
+        stale_before=datetime.now(timezone.utc) - timedelta(minutes=5),
+    )
+
+    db_session.refresh(job)
+    assert reaped_count == 0
+    assert job.status == ProcessingStatus.running
+    assert job.worker_id == "worker-a"
+
+
+def test_reap_stale_encoding_jobs_fails_exhausted_job(db_session):
+    video = ingest_video(db_session, "s3://input/video.mp4")
+    job = video.renditions[0].jobs[0]
+    claim_encoding_job(
+        db_session,
+        job.id,
+        job.video_id,
+        job.rendition_id,
+        worker_id="worker-a",
+    )
+    job.attempt_count = job.max_attempts
+    job.heartbeat_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    db_session.commit()
+
+    reaped_count = reap_stale_encoding_jobs(
+        db_session,
+        stale_before=datetime.now(timezone.utc) - timedelta(minutes=5),
+    )
+
+    db_session.refresh(job)
+    assert reaped_count == 1
+    assert job.status == ProcessingStatus.failed
+    assert job.rendition.status == ProcessingStatus.failed
+    assert job.worker_id is None
+    assert job.heartbeat_at is None
+    assert job.outbox_message is None
 
 
 def test_successful_rendition_does_not_hide_existing_failed_rendition(db_session):
