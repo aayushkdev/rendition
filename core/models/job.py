@@ -31,6 +31,7 @@ class Job(Base):
         UniqueConstraint("rendition_id", name="uq_jobs_rendition_id"),
         Index("ix_jobs_status_created_at", "status", "created_at"),
         Index("ix_jobs_status_started_at", "status", "started_at"),
+        Index("ix_jobs_status_next_run_at", "status", "next_run_at"),
         Index(
             "ix_jobs_running_heartbeat_at",
             "heartbeat_at",
@@ -93,6 +94,11 @@ class Job(Base):
     )
 
     heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    next_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )

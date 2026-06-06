@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     WORKER_HEARTBEAT_INTERVAL_SECONDS: int = Field(default=60, ge=1)
     JOB_REAPER_INTERVAL_SECONDS: int = Field(default=120, ge=1)
     JOB_STALE_TIMEOUT_SECONDS: int = Field(default=300, ge=1)
+    JOB_RETRY_BACKOFF_SECONDS: str = "30,120,600"
 
     ENVIRONMENT: str = "local"
 
@@ -58,6 +59,16 @@ class Settings(BaseSettings):
             for content_type in self.UPLOAD_ALLOWED_CONTENT_TYPES.split(",")
             if content_type.strip()
         }
+
+    @property
+    def job_retry_backoff_seconds(self) -> list[int]:
+        values: list[int] = []
+        for raw_value in self.JOB_RETRY_BACKOFF_SECONDS.split(","):
+            value = raw_value.strip()
+            if not value:
+                continue
+            values.append(max(0, int(value)))
+        return values or [0]
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
